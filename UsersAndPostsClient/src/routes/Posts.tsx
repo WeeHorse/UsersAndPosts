@@ -19,6 +19,10 @@ export async function postsAction({ request }: ActionFunctionArgs) {
 export function Posts() {
   const { posts } = useLoaderData() as { posts: PostDto[]; };
 
+  if (!Array.isArray(posts)) {
+    return <pre>Expected posts to be an array, got: {JSON.stringify(posts, null, 2)}</pre>;
+  }
+
   return (
     <div>
       <h1>Posts</h1>
