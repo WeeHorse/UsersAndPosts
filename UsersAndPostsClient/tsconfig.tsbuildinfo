@@ -1,0 +1,1 @@
+{"root":["./src/main.tsx","./src/router.tsx","./src/api/http.ts","./src/api/posts.ts","./src/api/users.ts","./src/generated/dtos.ts","./src/routes/home.tsx","./src/routes/posts.tsx","./src/routes/root.tsx","./src/routes/userdetail.tsx","./src/routes/users.tsx"],"version":"5.9.3"}
