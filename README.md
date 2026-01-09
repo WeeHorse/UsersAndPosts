@@ -143,4 +143,72 @@ cd UsersAndPostsClient && npm run dev
 * `VITE_API_BASE` kan sättas om du vill peka klienten mot annat API än `/api` (default är `/api`).
 * `dtos.json` används av `/api/dtos` och som input till genereringen av TypeScript-typer.
 
+---
+
+Perfekt – här är ett **kort, tydligt tillägg** som du kan klistra in i README:n, t.ex. **efter “Noteringar”** eller som en egen sektion nära slutet.
+Det beskriver **vad CI gör och varför**, utan att gå in på deploy.
+
+---
+
+## CI (Continuous Integration)
+
+Projektet innehåller en GitHub Actions-pipeline som automatiskt verifierar att **backend, kontrakt och frontend hänger ihop** vid varje push och pull request mot `main`.
+
+CI-flödet är medvetet uppdelat i tydliga steg som speglar hur projektet är uppbyggt lokalt.
+
+### Vad CI gör
+
+**1. Restore & säkerhetskontroll**
+
+* Återställer alla .NET-beroenden
+* Kör en sårbarhetskontroll av NuGet-paket (`dotnet list package --vulnerable`)
+* Failar bygget om kända sårbarheter hittas
+
+**2. Build av backend**
+
+* Bygger hela solutionen i `Release`
+* Säkerställer att C#-koden (inkl. DTO-records) är korrekt
+
+**3. Generering av DTO-kontrakt**
+
+* Kör `UsersAndPosts.DtoContractGen`
+* Genererar `UsersAndPosts/dtos.json` **vid build-time**
+* Validerar att filen finns och innehåller giltig JSON
+
+> `dtos.json` versionsstyrs inte – den ses som ett genererat kontrakt baserat på C#-koden.
+
+**4. Build av klient**
+
+* Installerar npm-beroenden
+* Genererar TypeScript-typer (`dtos.ts`) från `dtos.json`
+* Kör `npm run build`, vilket:
+
+  * bygger React-klienten
+  * skriver statiska filer direkt till API-projektets `wwwroot`
+
+**5. Tester**
+
+* Kör alla .NET-tester (`dotnet test`)
+
+**6. Konsistens-kontroll**
+
+* Kontrollerar att inga versionsstyrda filer har ändrats av build-stegen
+* Failar CI om bygget genererar filer som borde vara committade (eller ignorerade)
+
+**7. Publish-artefakt**
+
+* Kör `dotnet publish`
+* Kopierar `dtos.json` till publish-root (krävs för `/api/dtos`)
+* Laddar upp resultatet som en GitHub-artefakt
+
+### Varför detta CI-upplägg?
+
+* **Kontrakt först**
+  DTO-kedjan (C# → JSON → TypeScript) verifieras automatiskt.
+* **Samma beteende lokalt och i CI**
+  CI kör samma kommandon som en utvecklare kör manuellt.
+* **Tydliga fel tidigt**
+  Problem med kontrakt, typer, klientbuild eller sårbarheter stoppas innan merge.
+* **Deploy-agnostiskt**
+  CI producerar ett färdigt publish-artefakt utan att anta var eller hur det deployas.
 
