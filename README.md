@@ -152,6 +152,8 @@ Det beskriver **vad CI gör och varför**, utan att gå in på deploy.
 
 ## CI (Continuous Integration)
 
+_OBS! Dokumentationen nedan behöver uppdateras_
+
 Projektet innehåller en GitHub Actions-pipeline som automatiskt verifierar att **backend, kontrakt och frontend hänger ihop** vid varje push och pull request mot `main`.
 
 CI-flödet är medvetet uppdelat i tydliga steg som speglar hur projektet är uppbyggt lokalt.

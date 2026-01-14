@@ -2,8 +2,9 @@ name: CI
 
 on:
   pull_request:
-  push:
     branches: ["main"]
+  push:
+    branches: ["cidev"]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -26,18 +27,43 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            **/packages.lock.json
 
       - name: Restore
         run: dotnet restore UsersAndPosts.sln
 
       # --- Vulnerable package check ---
-
       - name: NuGet vulnerable packages (fail if any)
-        run: dotnet list UsersAndPosts.sln package --vulnerable --include-transitive
+        run: |
+          set -e
+          OUT=$(dotnet list UsersAndPosts.sln package --vulnerable --include-transitive)
+          echo "$OUT"
+          echo "$OUT" | grep -qi "vulnerab" && (echo "Vulnerable packages found" && exit 1) || true
+
+      # --- C# Lint / Format check ---
+      - name: C# format check (dotnet format)
+        run: dotnet format --verify-no-changes
 
       # --- Build ---
       - name: Build (needed for generator)
         run: dotnet build UsersAndPosts.sln -c Release --no-restore
+
+      # --- Validate no tracked files were changed by dotnet build ---
+      - name: Fail if dotnet build changed tracked files
+        run: |
+          if ! git diff --quiet; then
+            echo "ERROR: build modified tracked files."
+            echo ""
+            echo "Changed files:"
+            git diff --name-only
+            echo ""
+            echo "Diff (first 200 lines):"
+            git diff | head -n 200
+            exit 1
+          fi
 
       # --- DTO contract generation (build-time artifact) ---
       - name: Generate dtos.json from C# DTOs
@@ -60,6 +86,11 @@ jobs:
         working-directory: UsersAndPostsClient
         run: npm ci
 
+      # --- Frontend lint (check-mode) ---
+      - name: Lint client (ESLint)
+        working-directory: UsersAndPostsClient
+        run: npm run lint
+
       - name: Generate dtos.ts from generated dtos.json
         working-directory: UsersAndPostsClient
         run: npm run gen:dtos
@@ -68,18 +99,23 @@ jobs:
         working-directory: UsersAndPostsClient
         run: npm run build
 
+      # --- Validate no tracked files were changed by NPM build ---
+      - name: Fail if NPM build changed tracked files
+        run: |
+          if ! git diff --quiet; then
+            echo "ERROR: build modified tracked files."
+            echo ""
+            echo "Changed files:"
+            git diff --name-only
+            echo ""
+            echo "Diff (first 200 lines):"
+            git diff | head -n 200
+            exit 1
+          fi
+
       # --- Tests ---
       - name: Test
         run: dotnet test UsersAndPosts.sln -c Release --no-build
-
-      # --- Validate no tracked files were changed by build steps ---
-      - name: Fail if build changed tracked files
-        run: |
-          if ! git diff --quiet; then
-            echo "ERROR: build modified tracked files. Commit generated outputs or update .gitignore policy."
-            git diff --name-only
-            exit 1
-          fi
 
       # --- Publish (includes wwwroot) ---
       - name: Publish API
