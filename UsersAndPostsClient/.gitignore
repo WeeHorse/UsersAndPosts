@@ -3,3 +3,4 @@ dist
 .vite
 src/generated/dtos.ts
 tsconfig.tsbuildinfo
+.env
