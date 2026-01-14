@@ -1,71 +1,138 @@
+# ============================================================
+# CI (Continuous Integration) för UsersAndPosts
+#
+# Målbild:
+# - Bygga + testa en fullstack-app (ASP.NET + React)
+# - Köra en kontraktskedja (C# DTOs → dtos.json → dtos.ts)
+# - Köra grundläggande säkerhetsgate (NuGet vulnerabilities)
+# - Köra lint/checks utan att auto-fixa eller ändra filer
+# - Publicera en deploybar artefakt (dotnet publish + wwwroot)
+#
+# Viktig princip:
+# CI ska vara en "objektiv grind": samma checklista för alla commits.
+# ============================================================
+
 name: CI
 
+# ------------------------------------------------------------
+# Triggers
+# ------------------------------------------------------------
 on:
+  # Körs för PRs in i main (kvalitets-gate innan merge)
   pull_request:
     branches: ["main"]
+
+  # Körs för pushes till en separat CI-branch (bra när man utvecklar pipelinen)
   push:
     branches: ["cidev"]
 
+# ------------------------------------------------------------
+# Concurrency: avbryt gamla körningar på samma ref/branch
+# ------------------------------------------------------------
 concurrency:
+  # Grupp per branch/PR-ref → bara senaste körningen "vinner"
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build_test_publish:
+    # Jobbnamnet visar vilken matrix-kombination som körs (bra i UI)
     name: Build + Test + Publish (node=${{ matrix.node }}, dotnet=${{ matrix.dotnet }})
     runs-on: ubuntu-latest
 
+    # ----------------------------------------------------------
+    # Matrix: kör flera kombinationer för kompatibilitetsbevis
+    #
+    # Grundregel: matrix = alla kombinationer (kartesiskt produkt)
+    # Exclude = policy: "kör inte orimliga kombinationer"
+    # ----------------------------------------------------------
     strategy:
+      # Kör klart övriga kombinationer även om en fallerar
       fail-fast: false
+
       matrix:
+        # Frontend-miljöer
         node: ["18.x", "20.x"]
+
+        # Backend-miljöer
         dotnet: ["8.0.x", "9.0.x"]
 
         exclude:
-          # Kör inte Node 18 tillsammans med .NET 9
+          # Policy-exempel: ny .NET kräver modern Node (undervisningsmässigt tydlig)
           - node: "18.x"
             dotnet: "9.0.x"
-          # Kör inte Node 20 tillsammans med .NET 8
+
+          # Policy-exempel: vi väljer att INTE testa "gamla" .NET med "ny" Node
+          # (Detta är en medveten begränsning för att hålla matrix-körningar nere.)
           - node: "20.x"
             dotnet: "8.0.x"
 
     env:
-      # Gör build deterministisk: klienten får alltid /api om någon läser in env
+      # Publik frontend-config (ingen hemlig data i frontend!)
+      # Om klienten läser in VITE_* får den alltid /api i CI.
       VITE_API_BASE: /api
 
     steps:
-      - uses: actions/checkout@v4
+      # =========================================================
+      # 0) Checkout: hämta koden till runnern
+      # =========================================================
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # --- .NET setup ---
+      # =========================================================
+      # 1) .NET: setup + restore + quality/security gates
+      # =========================================================
       - name: Setup .NET ${{ matrix.dotnet }}
         uses: actions/setup-dotnet@v4
         with:
+          # Matrix-styrd SDK-version
           dotnet-version: ${{ matrix.dotnet }}
+
+          # NuGet-cache: snabbare restore → snabbare feedback-loop
           cache: true
           cache-dependency-path: |
             **/*.csproj
             **/packages.lock.json
 
+      # Restore: hämta dependencies
       - name: Restore
         run: dotnet restore UsersAndPosts.sln
 
-      # --- Vulnerable package check ---
+      # ---------------------------------------------------------
+      # Security gate: faila om sårbara paket hittas
+      #
+      # Varför här?
+      # - Tidig avbrytning sparar tid (fail fast)
+      # - Sårbarheter ska synas innan man bygger/testar/deployar
+      # ---------------------------------------------------------
       - name: NuGet vulnerable packages (fail if any)
         run: |
           set -e
           OUT=$(dotnet list UsersAndPosts.sln package --vulnerable --include-transitive)
           echo "$OUT"
+          # Vi failar explicit om output innehåller "vulnerab"
           echo "$OUT" | grep -qi "vulnerab" && (echo "Vulnerable packages found" && exit 1) || true
 
-      # --- C# Lint / Format check ---
-      # - name: C# format check (dotnet format)
-      #  run: dotnet format --verify-no-changes
+      # ---------------------------------------------------------
+      # C# lint/check-mode: verifiera kodstandard utan att ändra filer
+      # ---------------------------------------------------------
+      - name: C# format check (dotnet format)
+        run: dotnet format --verify-no-changes
 
-      # --- Build ---
+      # ---------------------------------------------------------
+      # Build: behövs eftersom kontraktsgeneratorn kör .NET-kod
+      # ---------------------------------------------------------
       - name: Build (needed for generator)
         run: dotnet build UsersAndPosts.sln -c Release --no-restore
 
-      # --- Validate no tracked files were changed by dotnet build ---
+      # ---------------------------------------------------------
+      # Reproducerbarhets-gate:
+      # "CI ska inte ändra spårade filer bara genom att bygga."
+      #
+      # Om detta fallerar:
+      # - antingen committa genererade outputs
+      # - eller ändra .gitignore/policy
+      # ---------------------------------------------------------
       - name: Fail if dotnet build changed tracked files
         run: |
           if ! git diff --quiet; then
@@ -79,41 +146,56 @@ jobs:
             exit 1
           fi
 
-      # --- DTO contract generation (build-time artifact) ---
+      # =========================================================
+      # 2) DTO-kontraktskedja: C# DTOs → dtos.json → dtos.ts
+      # =========================================================
+
+      # Generera dtos.json från C# DTO-records (Source of Truth)
       - name: Generate dtos.json from C# DTOs
         run: dotnet run -c Release --project UsersAndPosts.DtoContractGen
 
+      # Gate: dtos.json måste finnas och vara valid JSON
       - name: Validate dtos.json exists and is valid JSON
         run: |
           test -f UsersAndPosts/dtos.json || (echo "dtos.json was not generated" && exit 1)
           node -e "JSON.parse(require('fs').readFileSync('UsersAndPosts/dtos.json','utf8')); console.log('dtos.json OK');"
 
-      # --- Node / Client ---
+      # =========================================================
+      # 3) Node/React: setup + install + lint + build
+      # =========================================================
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
+          # Matrix-styrd Node-version
           node-version: ${{ matrix.node }}
+
+          # npm-cache: snabbare npm ci
           cache: "npm"
           cache-dependency-path: UsersAndPostsClient/package-lock.json
 
+      # Installera exakt de versioner som låsts i package-lock.json
       - name: Install client deps
         working-directory: UsersAndPostsClient
         run: npm ci
 
-      # --- Frontend lint (check-mode) ---
+      # Frontend lint i check-mode (ingen --fix, ingen formattering)
       - name: Lint client (ESLint)
         working-directory: UsersAndPostsClient
         run: npm run lint
 
+      # Generera TypeScript-typer från dtos.json (kontraktskedjans andra länk)
       - name: Generate dtos.ts from generated dtos.json
         working-directory: UsersAndPostsClient
         run: npm run gen:dtos
 
+      # Bygg klienten och skriv output till API:s wwwroot
+      # => publish-steget tar med frontend i samma deploybara bundle.
       - name: Build client (writes to API wwwroot)
         working-directory: UsersAndPostsClient
         run: npm run build
 
-      # --- Validate no tracked files were changed by NPM build ---
+      # Samma reproducerbarhets-gate för frontend-bygg:
+      # byggsteg ska inte smyga in ändringar i spårade filer.
       - name: Fail if NPM build changed tracked files
         run: |
           if ! git diff --quiet; then
@@ -127,24 +209,32 @@ jobs:
             exit 1
           fi
 
-      # --- Tests ---
+      # =========================================================
+      # 4) Tester: verifiera backend efter att kontraktskedjan + klientbuild körts
+      # =========================================================
       - name: Test
         run: dotnet test UsersAndPosts.sln -c Release --no-build
 
-      # --- Publish (includes wwwroot) ---
+      # =========================================================
+      # 5) Publish + artifact: skapa deploybar output
+      # =========================================================
       - name: Publish API
         run: dotnet publish UsersAndPosts/UsersAndPosts.csproj -c Release -o out --no-build
 
+      # Lägg kontraktet i publish-rot (nyttigt för inspektion/debug/deploy)
       - name: Copy dtos.json into publish root
         run: cp UsersAndPosts/dtos.json out/dtos.json
 
+      # Upload artifact: unik per matrix-kombination för att undvika krockar
       - name: Upload artifact (published app)
         uses: actions/upload-artifact@v4
         with:
-          # Viktigt: unikt namn per matrix-kombination
           name: UsersAndPosts-publish-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}
           path: out
 
+      # =========================================================
+      # 6) Job summary: kort, mänskligt läsbar rapport i GitHub UI
+      # =========================================================
       - name: Job summary
         if: always()
         run: |
