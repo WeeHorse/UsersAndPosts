@@ -1,12 +1,3 @@
-# ============================================================
-# CI (Continuous Integration) för UsersAndPosts
-#
-# Steg 2 (Deep Dive): Artefakter mellan jobb
-# - backend_contract producerar dtos.json → upload artifact
-# - frontend_build konsumerar dtos.json, bygger wwwroot → upload artifact
-# - test_publish konsumerar dtos.json + wwwroot och producerar deploybar out → upload artifact
-# ============================================================
-
 name: CI
 
 on:
@@ -19,13 +10,50 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# ------------------------------------------------------------
+# Policy-flaggor (Steg 3)
+# - Vi uttrycker vår "pipeline-policy" explicit.
+# ------------------------------------------------------------
+env:
+  # Publicera deploybar artefakt även på push till dev-branch?
+  # Sätt till "false" om du bara vill publicera på PR eller main senare.
+  PUBLISH_ON_PUSH: "true"
+
 jobs:
   # ============================================================
-  # 1) BACKEND + KONTRAKT
+  # SECURITY (Steg 3)
+  #
+  # Ett separat jobb som körs EN gång per workflow (ingen matrix).
+  # Syfte: tydlig parallellitet och tydlig policy-yta.
+  #
+  # I Steg 4 blir detta SARIF/CodeQL-jobbet.
+  # ============================================================
+  security_policy:
+    name: Security policy (single run)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Policy summary
+        run: |
+          {
+            echo "## Security policy"
+            echo ""
+            echo "- Event: **${{ github.event_name }}**"
+            echo "- Ref: **${{ github.ref }}**"
+            echo "- PR target: **${{ github.base_ref }}**"
+            echo ""
+            echo "### What this job does (Step 3)"
+            echo "- Establishes a dedicated security lane (no matrix)."
+            echo "- Step 4 will add SARIF-producing security scans here."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================
+  # 1) BACKEND + KONTRAKT (matrix)
   # ============================================================
   backend_contract:
     name: Backend + Contract (node=${{ matrix.node }}, dotnet=${{ matrix.dotnet }})
     runs-on: ubuntu-latest
+    needs: security_policy  # <- visar dependencies även mot ett "policy-jobb"
 
     strategy:
       fail-fast: false
@@ -57,15 +85,18 @@ jobs:
       - name: Restore
         run: dotnet restore UsersAndPosts.sln
 
-      # NuGet vulnerability check, gate and report
+      # ---------------------------------------------------------
+      # NuGet vulnerability scan = rapport + (policy-styrd) gate
+      #
+      # - Vi vill ALLTID ha rapport (för insyn)
+      # - Vi vill gate:a på PR (kvalitetsgrind inför merge)
+      # ---------------------------------------------------------
       - name: NuGet vulnerable packages (report)
         id: nuget_vuln
         run: |
           set +e
           report="nuget-vuln-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}.txt"
           dotnet list UsersAndPosts.sln package --vulnerable --include-transitive --verbosity detailed | tee "$report"
-          exit_code=${PIPESTATUS[0]}
-          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           echo "report=$report" >> $GITHUB_OUTPUT
           exit 0
 
@@ -77,24 +108,14 @@ jobs:
           path: ${{ steps.nuget_vuln.outputs.report }}
           retention-days: 14
 
-      - name: Add NuGet report to summary
-        if: always()
+      - name: Gate: fail PR if vulnerabilities found
+        if: github.event_name == 'pull_request'
         run: |
-          echo "## NuGet vulnerability scan" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-
           report="${{ steps.nuget_vuln.outputs.report }}"
-          if [ -n "$report" ] && [ -f "$report" ]; then
-            echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
-            tail -n 200 "$report" >> "$GITHUB_STEP_SUMMARY"
-            echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "_No NuGet vulnerability report file found (scan step may have failed early)._ " >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$report" ] && grep -qi "vulnerab" "$report"; then
+            echo "Vulnerable packages found (see report artifact)."
+            exit 1
           fi
-
-      - name: Fail if vulnerabilities found
-        if: steps.nuget_vuln.outputs.exit_code != '0'
-        run: exit 1
 
       - name: C# format check (dotnet format)
         run: dotnet format --verify-no-changes
@@ -121,12 +142,8 @@ jobs:
       - name: Validate dtos.json exists and is valid JSON
         run: |
           test -f UsersAndPosts/dtos.json || (echo "dtos.json was not generated" && exit 1)
-          node -e "JSON.parse(require('fs').readFileSync('UsersAndPosts/dtos.json','utf8')); console.log('dtos.json OK');"
+          python -c "import json; json.load(open('UsersAndPosts/dtos.json')); print('dtos.json OK')"
 
-      # ---------------------------------------------------------
-      # Artefakt 1: DTO-kontraktet (dtos.json)
-      # Gör kontraktet till en "fysisk leverans" mellan jobb.
-      # ---------------------------------------------------------
       - name: Upload artifact (dto contract)
         uses: actions/upload-artifact@v4
         with:
@@ -134,7 +151,7 @@ jobs:
           path: UsersAndPosts/dtos.json
 
   # ============================================================
-  # 2) FRONTEND
+  # 2) FRONTEND (matrix)
   # ============================================================
   frontend_build:
     name: Frontend (node=${{ matrix.node }}, dotnet=${{ matrix.dotnet }})
@@ -159,10 +176,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ---------------------------------------------------------
-      # Konsumera DTO-kontraktet från backend-jobbet
-      # Vi laddar ner artefakten och lägger den på rätt plats i repot.
-      # ---------------------------------------------------------
       - name: Download artifact (dto contract)
         uses: actions/download-artifact@v4
         with:
@@ -172,7 +185,7 @@ jobs:
       - name: Validate downloaded dtos.json
         run: |
           test -f UsersAndPosts/dtos.json || (echo "dtos.json missing after download" && exit 1)
-          node -e "JSON.parse(require('fs').readFileSync('UsersAndPosts/dtos.json','utf8')); console.log('downloaded dtos.json OK');"
+          python -c "import json; json.load(open('UsersAndPosts/dtos.json')); print('downloaded dtos.json OK')"
 
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v4
@@ -210,10 +223,6 @@ jobs:
             exit 1
           fi
 
-      # ---------------------------------------------------------
-      # Artefakt 2: Frontend output (API:s wwwroot)
-      # Gör frontend-build till en "fysisk leverans" mellan jobb.
-      # ---------------------------------------------------------
       - name: Upload artifact (wwwroot)
         uses: actions/upload-artifact@v4
         with:
@@ -221,7 +230,7 @@ jobs:
           path: UsersAndPosts/wwwroot
 
   # ============================================================
-  # 3) TEST + PUBLISH
+  # 3) TEST + PUBLISH (matrix)
   # ============================================================
   test_publish:
     name: Test + Publish (node=${{ matrix.node }}, dotnet=${{ matrix.dotnet }})
@@ -246,14 +255,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Konsumera DTO-kontraktet igen (för publish + för att lägga i out/)
       - name: Download artifact (dto contract)
         uses: actions/download-artifact@v4
         with:
           name: dto-contract-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}
           path: UsersAndPosts
 
-      # Konsumera wwwroot från frontend-jobbet
       - name: Download artifact (wwwroot)
         uses: actions/download-artifact@v4
         with:
@@ -284,7 +291,14 @@ jobs:
       - name: Copy dtos.json into publish root
         run: cp UsersAndPosts/dtos.json out/dtos.json
 
+      # ---------------------------------------------------------
+      # Policy: publicera deploybar artefakt på PR,
+      # och på push endast om PUBLISH_ON_PUSH är true.
+      # ---------------------------------------------------------
       - name: Upload artifact (published app)
+        if: |
+          github.event_name == 'pull_request' ||
+          (github.event_name == 'push' && env.PUBLISH_ON_PUSH == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: UsersAndPosts-publish-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}
@@ -296,10 +310,16 @@ jobs:
           {
             echo "## CI summary"
             echo ""
+            echo "- Event: **${{ github.event_name }}**"
+            echo "- Ref: **${{ github.ref }}**"
             echo "- Matrix: **.NET ${{ matrix.dotnet }}** × **Node ${{ matrix.node }}**"
+            echo ""
+            echo "### Flow"
             echo "- 📦 Consumed artifact: dto-contract → \`UsersAndPosts/dtos.json\`"
-            echo "- 📦 Produced artifact: wwwroot → \`UsersAndPosts/wwwroot\`"
-            echo "- ✅ Generated \`UsersAndPostsClient/src/generated/dtos.ts\` from the contract"
+            echo "- 📦 Consumed artifact: wwwroot → \`UsersAndPosts/wwwroot\`"
             echo "- ✅ Tested + published API (with frontend in wwwroot)"
-            echo "- 📦 Uploaded artifact: **UsersAndPosts-publish-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}**"
+            echo ""
+            echo "### Publish policy"
+            echo "- PUBLISH_ON_PUSH: **${{ env.PUBLISH_ON_PUSH }}**"
+            echo "- Upload publish artifact: **yes** if PR, or push+policy"
           } >> "$GITHUB_STEP_SUMMARY"
