@@ -80,11 +80,17 @@ jobs:
       - name: Add NuGet report to summary
         if: always()
         run: |
-          echo "## NuGet vulnerability scan" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          tail -n 200 nuget-vuln.txt >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "## NuGet vulnerability scan" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          report="${{ steps.nuget_vuln.outputs.report }}"
+          if [ -n "$report" ] && [ -f "$report" ]; then
+            echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+            tail -n 200 "$report" >> "$GITHUB_STEP_SUMMARY"
+            echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_No NuGet vulnerability report file found (scan step may have failed early)._ " >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Fail if vulnerabilities found
         if: steps.nuget_vuln.outputs.exit_code != '0'
