@@ -115,6 +115,7 @@ jobs:
   # 2B) BACKEND TEST (parallellt med frontend_build)
   # - Här ligger din stora parallellvinst.
   # ============================================================
+
   backend_test:
     name: Backend test (dotnet=${{ matrix.dotnet }})
     runs-on: ubuntu-latest
@@ -151,7 +152,25 @@ jobs:
       - name: Build
         run: dotnet build UsersAndPosts.sln -c Release --no-restore
 
+      # =========================================================
+      # 🔐 NYTT: Beräkna unik SQLite-path per parallellt jobb
+      # =========================================================
+      - name: Compute SQLite DB path
+        id: db
+        env:
+          BASE: ${{ secrets.SQLITE_DB_PATH }}
+        run: |
+          UNIQUE="${BASE%.db}-${{ matrix.dotnet }}-${{ github.run_id }}.db"
+          echo "path=$UNIQUE" >> "$GITHUB_OUTPUT"
+          mkdir -p "$(dirname "$UNIQUE")"
+          touch "$UNIQUE"
+
+      # =========================================================
+      # 🔐 NYTT: Kör tester med Db__Path injicerad
+      # =========================================================
       - name: Test
+        env:
+          Db__Path: ${{ steps.db.outputs.path }}
         run: dotnet test UsersAndPosts.sln -c Release --no-build
 
   # ============================================================
