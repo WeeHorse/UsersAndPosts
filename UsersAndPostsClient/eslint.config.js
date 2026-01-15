@@ -45,6 +45,9 @@ export default [
          ✅ GENERELLA KVALITETSREGLER
          ========================= */
 
+      // Disable no-undef for TypeScript since TS handles it better
+      "no-undef": "off",
+
       "eqeqeq": ["error", "smart"],
 
       // JS-versionen stängs av till förmån för TS-varianten
@@ -93,6 +96,21 @@ export default [
       "react/jsx-indent": "off",
       "react/jsx-indent-props": "off",
       "react/jsx-curly-spacing": "off",
+    },
+  },
+
+  // Config for .mjs files (Node.js ES modules)
+  {
+    files: ["**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      // Keep basic rules, but allow Node globals
     },
   },
 ];

@@ -32,8 +32,7 @@ const typeMap = (t) => {
   }
 };
 
-let out = `/* eslint-disable */
-/**
+let out = `/**
  * AUTO-GENERATED FILE.
  * Source: ../UsersAndPosts/dtos.json
  * Do not edit manually.

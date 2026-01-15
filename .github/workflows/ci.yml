@@ -180,10 +180,9 @@ jobs:
         run: npm ci
 
       # Frontend lint i check-mode (ingen --fix, ingen formattering)
-      # (Avstängd nu p g a fel som behöver åtgärdas i kodbasen :)
-      # - name: Lint client (ESLint)
-      #  working-directory: UsersAndPostsClient
-      #  run: npm run lint
+      - name: Lint client (ESLint)
+        working-directory: UsersAndPostsClient
+        run: npm run lint
 
       # Generera TypeScript-typer från dtos.json (kontraktskedjans andra länk)
       - name: Generate dtos.ts from generated dtos.json
