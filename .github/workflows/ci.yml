@@ -193,7 +193,7 @@ jobs:
 
           # ✅ FIX: skriv ErrorLog till absolut path (inte relativt projektmapp)
           dotnet build UsersAndPosts.sln -c Release --no-restore \
-            /p:ErrorLog="$GITHUB_WORKSPACE/artifacts/sarif/dotnet-${{ matrix.dotnet }}.sarif",version=2.1
+            /p:ErrorLog="$GITHUB_WORKSPACE/artifacts/sarif/dotnet-${{ matrix.dotnet }}.sarif,version=2.1"
 
       - name: Upload SARIF (dotnet)
         if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
