@@ -9,7 +9,7 @@ public sealed class Db
     public Db(IConfiguration config)
     {
         // Liten, tydlig default
-        var dbPath = config["Db:Path"] ?? "app.db";
+        var dbPath = config["Db:Path"];
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = dbPath,
