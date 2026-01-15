@@ -87,7 +87,6 @@ jobs:
           path: UsersAndPosts/dtos.json
           if-no-files-found: error
 
-
   # ============================================================
   # 2) FRONTEND BUILD
   # ============================================================
@@ -159,7 +158,6 @@ jobs:
           path: UsersAndPosts/wwwroot
           if-no-files-found: error
 
-
   # ============================================================
   # 3) TEST
   # ============================================================
@@ -203,7 +201,6 @@ jobs:
 
       - name: Test
         run: dotnet test UsersAndPosts.sln -c Release --no-build
-
 
   # ============================================================
   # 4) PUBLISH + DEPLOYBAR ARTEFAKT
