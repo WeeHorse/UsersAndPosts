@@ -6,6 +6,11 @@ on:
   push:
     branches: ["noci"]
 
+# Behövs för att kunna ladda upp SARIF till GitHub Code Scanning
+permissions:
+  contents: read
+  security-events: write
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -100,6 +105,36 @@ jobs:
         working-directory: UsersAndPostsClient
         run: npm run gen:dtos
 
+      # =========================================================
+      # 🧾 SARIF: ESLint -> SARIF (rapport + gate)
+      # =========================================================
+      - name: Run ESLint (emit SARIF)
+        id: eslint
+        working-directory: UsersAndPostsClient
+        run: |
+          mkdir -p ../artifacts/sarif
+          npm i --no-save @microsoft/eslint-formatter-sarif
+
+          set +e
+          npx eslint . \
+            -f @microsoft/eslint-formatter-sarif \
+            -o ../artifacts/sarif/eslint-node${{ matrix.node }}.sarif
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload SARIF (eslint)
+        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: UsersAndPostsClient/../artifacts/sarif/eslint-node${{ matrix.node }}.sarif
+          category: eslint-node${{ matrix.node }}
+
+      - name: Fail if ESLint found issues
+        if: ${{ steps.eslint.outputs.exit_code != '0' }}
+        run: |
+          echo "ESLint found issues (exit=${{ steps.eslint.outputs.exit_code }})"
+          exit 1
+
       - name: Build client (writes to API wwwroot)
         working-directory: UsersAndPostsClient
         run: npm run build
@@ -113,9 +148,7 @@ jobs:
 
   # ============================================================
   # 2B) BACKEND TEST (parallellt med frontend_build)
-  # - Här ligger din stora parallellvinst.
   # ============================================================
-
   backend_test:
     name: Backend test (dotnet=${{ matrix.dotnet }})
     runs-on: ubuntu-latest
@@ -130,7 +163,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # (valfritt men pedagogiskt) hämta kontraktet även här
       - name: Download artifact (dtos.json)
         uses: actions/download-artifact@v4
         with:
@@ -149,11 +181,24 @@ jobs:
       - name: Restore
         run: dotnet restore UsersAndPosts.sln
 
-      - name: Build
-        run: dotnet build UsersAndPosts.sln -c Release --no-restore
+      # =========================================================
+      # 🧾 SARIF: .NET build -> SARIF (ErrorLog)
+      # =========================================================
+      - name: Build (emit SARIF)
+        run: |
+          mkdir -p artifacts/sarif
+          dotnet build UsersAndPosts.sln -c Release --no-restore \
+            /p:ErrorLog=artifacts/sarif/dotnet-${{ matrix.dotnet }}.sarif,version=2.1
+
+      - name: Upload SARIF (dotnet)
+        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: artifacts/sarif/dotnet-${{ matrix.dotnet }}.sarif
+          category: dotnet-${{ matrix.dotnet }}
 
       # =========================================================
-      # 🔐 NYTT: Beräkna unik SQLite-path per parallellt jobb
+      # 🔐 Beräkna unik SQLite-path per parallellt jobb
       # =========================================================
       - name: Compute SQLite DB path
         id: db
@@ -165,9 +210,6 @@ jobs:
           mkdir -p "$(dirname "$UNIQUE")"
           touch "$UNIQUE"
 
-      # =========================================================
-      # 🔐 NYTT: Kör tester med Db__Path injicerad
-      # =========================================================
       - name: Test
         env:
           Db__Path: ${{ steps.db.outputs.path }}
@@ -175,7 +217,6 @@ jobs:
 
   # ============================================================
   # 3) PUBLISH (väntar på både frontend + backend_test)
-  # - välj en "canonical" frontend-artefakt (här Node 20.x)
   # ============================================================
   publish:
     name: Publish (dotnet=8.0.x, wwwroot=node20.x)
