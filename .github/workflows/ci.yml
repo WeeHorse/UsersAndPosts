@@ -117,8 +117,8 @@ jobs:
       # C# lint/check-mode: verifiera kodstandard utan att ändra filer
       #   (avstängd nedan nu p g a mycket nitisk med whitespace)
       # ---------------------------------------------------------
-      # - name: C# format check (dotnet format)
-      #  run: dotnet format --verify-no-changes
+      - name: C# format check (dotnet format)
+        run: dotnet format --verify-no-changes
 
       # ---------------------------------------------------------
       # Build: behövs eftersom kontraktsgeneratorn kör .NET-kod
