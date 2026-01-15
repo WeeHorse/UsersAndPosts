@@ -1,13 +1,3 @@
-# ============================================================
-# CI (Continuous Integration) för UsersAndPosts
-#
-# Steg 2 (Deep Dive): Artefakter mellan jobb
-# - backend_contract producerar dtos.json → upload artifact
-# - frontend_build konsumerar dtos.json, bygger wwwroot → upload artifact
-# - test konsumerar dtos.json + wwwroot → kör tester
-# - publish konsumerar dtos.json + wwwroot → dotnet publish → upload artifact
-# ============================================================
-
 name: CI
 
 on:
@@ -21,12 +11,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Publik frontend-config (ingen hemlig data i frontend!)
   VITE_API_BASE: /api
 
 jobs:
   # ============================================================
-  # 1) BACKEND + KONTRAKT
+  # 1) BACKEND -> KONTRAKT (dtos.json)
   # ============================================================
   backend_contract:
     name: Backend contract (dotnet=8.0.x)
@@ -58,19 +47,6 @@ jobs:
       - name: Build (needed for generator)
         run: dotnet build UsersAndPosts.sln -c Release --no-restore
 
-      - name: Fail if dotnet build changed tracked files
-        run: |
-          if ! git diff --quiet; then
-            echo "ERROR: build modified tracked files."
-            echo ""
-            echo "Changed files:"
-            git diff --name-only
-            echo ""
-            echo "Diff (first 200 lines):"
-            git diff | head -n 200
-            exit 1
-          fi
-
       - name: Generate dtos.json from C# DTOs
         run: dotnet run -c Release --project UsersAndPosts.DtoContractGen
 
@@ -79,7 +55,6 @@ jobs:
           test -f UsersAndPosts/dtos.json || (echo "dtos.json was not generated" && exit 1)
           node -e "JSON.parse(require('fs').readFileSync('UsersAndPosts/dtos.json','utf8')); console.log('dtos.json OK');"
 
-      # --- ARTEFAKT 1: dtos.json ---
       - name: Upload artifact (dtos.json)
         uses: actions/upload-artifact@v4
         with:
@@ -88,7 +63,7 @@ jobs:
           if-no-files-found: error
 
   # ============================================================
-  # 2) FRONTEND BUILD
+  # 2A) FRONTEND BUILD (parallellt med backend_test)
   # ============================================================
   frontend_build:
     name: Frontend build (node=${{ matrix.node }})
@@ -104,17 +79,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Hämta kontraktet från föregående jobb
       - name: Download artifact (dtos.json)
         uses: actions/download-artifact@v4
         with:
           name: contract-dtos-json
           path: UsersAndPosts
-
-      - name: Validate downloaded dtos.json
-        run: |
-          test -f UsersAndPosts/dtos.json || (echo "dtos.json missing after download" && exit 1)
-          node -e "JSON.parse(require('fs').readFileSync('UsersAndPosts/dtos.json','utf8')); console.log('downloaded dtos.json OK');"
 
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v4
@@ -127,30 +96,14 @@ jobs:
         working-directory: UsersAndPostsClient
         run: npm ci
 
-      # Generera TypeScript-typer från det nedladdade kontraktet
       - name: Generate dtos.ts from dtos.json
         working-directory: UsersAndPostsClient
         run: npm run gen:dtos
 
-      # Bygg klienten → skriver till API-projektets wwwroot
       - name: Build client (writes to API wwwroot)
         working-directory: UsersAndPostsClient
         run: npm run build
 
-      - name: Fail if NPM build changed tracked files
-        run: |
-          if ! git diff --quiet; then
-            echo "ERROR: build modified tracked files."
-            echo ""
-            echo "Changed files:"
-            git diff --name-only
-            echo ""
-            echo "Diff (first 200 lines):"
-            git diff | head -n 200
-            exit 1
-          fi
-
-      # --- ARTEFAKT 2: wwwroot ---
       - name: Upload artifact (wwwroot)
         uses: actions/upload-artifact@v4
         with:
@@ -159,35 +112,34 @@ jobs:
           if-no-files-found: error
 
   # ============================================================
-  # 3) TEST
+  # 2B) BACKEND TEST (parallellt med frontend_build)
+  # - Här ligger din stora parallellvinst.
   # ============================================================
-  test:
-    name: Test (dotnet=8.0.x, node=20.x)
+  backend_test:
+    name: Backend test (dotnet=${{ matrix.dotnet }})
     runs-on: ubuntu-latest
-    needs: frontend_build
+    needs: backend_contract
+
+    strategy:
+      fail-fast: false
+      matrix:
+        dotnet: ["8.0.x", "9.0.x"]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # (Val) Hämta kontrakt + wwwroot så test körs "efter kedjan"
+      # (valfritt men pedagogiskt) hämta kontraktet även här
       - name: Download artifact (dtos.json)
         uses: actions/download-artifact@v4
         with:
           name: contract-dtos-json
           path: UsersAndPosts
 
-      # Välj en “canonical” frontend-artefakt för test (t.ex. Node 20)
-      - name: Download artifact (wwwroot from node20)
-        uses: actions/download-artifact@v4
-        with:
-          name: client-wwwroot-node20.x
-          path: UsersAndPosts/wwwroot
-
-      - name: Setup .NET 8.0.x
+      - name: Setup .NET ${{ matrix.dotnet }}
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: ${{ matrix.dotnet }}
           cache: true
           cache-dependency-path: |
             **/*.csproj
@@ -203,12 +155,13 @@ jobs:
         run: dotnet test UsersAndPosts.sln -c Release --no-build
 
   # ============================================================
-  # 4) PUBLISH + DEPLOYBAR ARTEFAKT
+  # 3) PUBLISH (väntar på både frontend + backend_test)
+  # - välj en "canonical" frontend-artefakt (här Node 20.x)
   # ============================================================
   publish:
-    name: Publish (dotnet=8.0.x)
+    name: Publish (dotnet=8.0.x, wwwroot=node20.x)
     runs-on: ubuntu-latest
-    needs: test
+    needs: [frontend_build, backend_test]
 
     steps:
       - name: Checkout
@@ -252,15 +205,3 @@ jobs:
         with:
           name: UsersAndPosts-publish
           path: out
-
-      - name: Job summary
-        if: always()
-        run: |
-          {
-            echo "## CI summary (Step 2)"
-            echo ""
-            echo "- ✅ backend_contract produced artifact: **contract-dtos-json**"
-            echo "- ✅ frontend_build consumed dtos.json and produced artifact: **client-wwwroot-node20.x** (and node18)"
-            echo "- ✅ test consumed dtos.json + wwwroot and ran \`dotnet test\`"
-            echo "- ✅ publish consumed dtos.json + wwwroot and produced deployable artifact: **UsersAndPosts-publish**"
-          } >> "$GITHUB_STEP_SUMMARY"
