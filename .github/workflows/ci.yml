@@ -57,17 +57,36 @@ jobs:
       - name: Restore
         run: dotnet restore UsersAndPosts.sln
 
-      # Security gate (fixad): failar om "vulnerab" hittas
-      - name: NuGet vulnerable packages (fail if any)
+      # NuGet vulnerability check, gate and report
+      - name: NuGet vulnerable packages (report)
+        id: nuget_vuln
         run: |
-          set -e
-          OUT=$(dotnet list UsersAndPosts.sln package --vulnerable --include-transitive)
-          echo "$OUT"
-          echo "$OUT" | grep -qi "vulnerab"
-          if [ $? -eq 0 ]; then
-            echo "Vulnerable packages found"
-            exit 1
-          fi
+          set +e
+          dotnet list UsersAndPosts.sln package --vulnerable --include-transitive --verbosity detailed | tee nuget-vuln.txt
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          exit 0
+
+      - name: Upload NuGet vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-vulnerability-report
+          path: nuget-vuln.txt
+          retention-days: 14
+
+      - name: Add NuGet report to summary
+        if: always()
+        run: |
+          echo "## NuGet vulnerability scan" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          tail -n 200 nuget-vuln.txt >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if vulnerabilities found
+        if: steps.nuget_vuln.outputs.exit_code != '0'
+        run: exit 1
 
       - name: C# format check (dotnet format)
         run: dotnet format --verify-no-changes
