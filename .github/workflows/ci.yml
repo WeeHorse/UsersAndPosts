@@ -1,138 +1,80 @@
 # ============================================================
 # CI (Continuous Integration) för UsersAndPosts
 #
-# Målbild:
-# - Bygga + testa en fullstack-app (ASP.NET + React)
-# - Köra en kontraktskedja (C# DTOs → dtos.json → dtos.ts)
-# - Köra grundläggande säkerhetsgate (NuGet vulnerabilities)
-# - Köra lint/checks utan att auto-fixa eller ändra filer
-# - Skapa en deploybar artefakt (dotnet publish + wwwroot)
-#
-# Viktig princip:
-# CI ska vara en "objektiv grind": samma checklista för alla commits.
+# Steg 2 (Deep Dive): Artefakter mellan jobb
+# - backend_contract producerar dtos.json → upload artifact
+# - frontend_build konsumerar dtos.json, bygger wwwroot → upload artifact
+# - test_publish konsumerar dtos.json + wwwroot och producerar deploybar out → upload artifact
 # ============================================================
 
 name: CI
 
-# ------------------------------------------------------------
-# Triggers
-# ------------------------------------------------------------
 on:
-  # Körs för PRs in i main (kvalitets-gate innan merge)
   pull_request:
     branches: ["main"]
-
-  # Körs för pushes till aktuell devbranch (om du vill ha CI i den)
   push:
     branches: ["cidev"]
 
-# ------------------------------------------------------------
-# Concurrency: avbryt gamla körningar på samma ref/branch
-# ------------------------------------------------------------
 concurrency:
-  # Grupp per branch/PR-ref → bara senaste körningen "vinner"
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build_test_publish:
-    # Jobbnamnet visar vilken matrix-kombination som körs (bra i UI)
-    name: Build + Test + Publish (node=${{ matrix.node }}, dotnet=${{ matrix.dotnet }})
+  # ============================================================
+  # 1) BACKEND + KONTRAKT
+  # ============================================================
+  backend_contract:
+    name: Backend + Contract (node=${{ matrix.node }}, dotnet=${{ matrix.dotnet }})
     runs-on: ubuntu-latest
 
-    # ----------------------------------------------------------
-    # Matrix: kör flera kombinationer för kompatibilitetsbevis
-    #
-    # Grundregel: matrix = alla kombinationer (kartesiskt produkt)
-    # Exclude = policy: "kör inte orimliga kombinationer"
-    # ----------------------------------------------------------
     strategy:
-      # Kör klart övriga kombinationer även om en fallerar
       fail-fast: false
-
       matrix:
-        # Frontend-miljöer
         node: ["18.x", "20.x"]
-
-        # Backend-miljöer
         dotnet: ["8.0.x", "9.0.x"]
-
         exclude:
-          # Policy-exempel: ny .NET kräver modern Node (undervisningsmässigt tydlig)
           - node: "18.x"
             dotnet: "9.0.x"
-
-          # Policy-exempel: vi väljer att INTE testa "gamla" .NET med "ny" Node
-          # (Detta är en medveten begränsning för att hålla matrix-körningar nere.)
           - node: "20.x"
             dotnet: "8.0.x"
 
     env:
-      # Publik frontend-config (ingen hemlig data i frontend!)
-      # Om klienten läser in VITE_* får den alltid /api i CI.
       VITE_API_BASE: /api
 
     steps:
-      # =========================================================
-      # 0) Checkout: hämta koden till runnern
-      # =========================================================
       - name: Checkout
         uses: actions/checkout@v4
 
-      # =========================================================
-      # 1) .NET: setup + restore + quality/security gates
-      # =========================================================
       - name: Setup .NET ${{ matrix.dotnet }}
         uses: actions/setup-dotnet@v4
         with:
-          # Matrix-styrd SDK-version
           dotnet-version: ${{ matrix.dotnet }}
-
-          # NuGet-cache: snabbare restore → snabbare feedback-loop
           cache: true
           cache-dependency-path: |
             **/*.csproj
             **/packages.lock.json
 
-      # Restore: hämta dependencies
       - name: Restore
         run: dotnet restore UsersAndPosts.sln
 
-      # ---------------------------------------------------------
-      # Security gate: faila om sårbara paket hittas
-      #
-      # Varför här?
-      # - Tidig avbrytning sparar tid (fail fast)
-      # - Sårbarheter ska synas innan man bygger/testar/deployar
-      # ---------------------------------------------------------
+      # Security gate (fixad): failar om "vulnerab" hittas
       - name: NuGet vulnerable packages (fail if any)
         run: |
           set -e
           OUT=$(dotnet list UsersAndPosts.sln package --vulnerable --include-transitive)
           echo "$OUT"
-          # Vi failar explicit om output innehåller "vulnerab"
-          echo "$OUT" | grep -qi "vulnerab" && (echo "Vulnerable packages found" && exit 1) || true
+          echo "$OUT" | grep -qi "vulnerab"
+          if [ $? -eq 0 ]; then
+            echo "Vulnerable packages found"
+            exit 1
+          fi
 
-      # ---------------------------------------------------------
-      # C# lint/check-mode: verifiera kodstandard utan att ändra filer
-      # ---------------------------------------------------------
       - name: C# format check (dotnet format)
         run: dotnet format --verify-no-changes
 
-      # ---------------------------------------------------------
-      # Build: behövs eftersom kontraktsgeneratorn kör .NET-kod
-      # ---------------------------------------------------------
       - name: Build (needed for generator)
         run: dotnet build UsersAndPosts.sln -c Release --no-restore
 
-      # ---------------------------------------------------------
-      # Reproducerbarhets-gate:
-      # "CI ska inte ändra spårade filer bara genom att bygga."
-      #
-      # Om detta fallerar:
-      # - antingen committa genererade outputs
-      # - eller ändra .gitignore/policy
-      # ---------------------------------------------------------
       - name: Fail if dotnet build changed tracked files
         run: |
           if ! git diff --quiet; then
@@ -146,56 +88,89 @@ jobs:
             exit 1
           fi
 
-      # =========================================================
-      # 2) DTO-kontraktskedja: C# DTOs → dtos.json → dtos.ts
-      # =========================================================
-
-      # Generera dtos.json från C# DTO-records (Source of Truth)
       - name: Generate dtos.json from C# DTOs
         run: dotnet run -c Release --project UsersAndPosts.DtoContractGen
 
-      # Gate: dtos.json måste finnas och vara valid JSON
       - name: Validate dtos.json exists and is valid JSON
         run: |
           test -f UsersAndPosts/dtos.json || (echo "dtos.json was not generated" && exit 1)
           node -e "JSON.parse(require('fs').readFileSync('UsersAndPosts/dtos.json','utf8')); console.log('dtos.json OK');"
 
-      # =========================================================
-      # 3) Node/React: setup + install + lint + build
-      # =========================================================
+      # ---------------------------------------------------------
+      # Artefakt 1: DTO-kontraktet (dtos.json)
+      # Gör kontraktet till en "fysisk leverans" mellan jobb.
+      # ---------------------------------------------------------
+      - name: Upload artifact (dto contract)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dto-contract-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}
+          path: UsersAndPosts/dtos.json
+
+
+  # ============================================================
+  # 2) FRONTEND
+  # ============================================================
+  frontend_build:
+    name: Frontend (node=${{ matrix.node }}, dotnet=${{ matrix.dotnet }})
+    runs-on: ubuntu-latest
+    needs: backend_contract
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["18.x", "20.x"]
+        dotnet: ["8.0.x", "9.0.x"]
+        exclude:
+          - node: "18.x"
+            dotnet: "9.0.x"
+          - node: "20.x"
+            dotnet: "8.0.x"
+
+    env:
+      VITE_API_BASE: /api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------
+      # Konsumera DTO-kontraktet från backend-jobbet
+      # Vi laddar ner artefakten och lägger den på rätt plats i repot.
+      # ---------------------------------------------------------
+      - name: Download artifact (dto contract)
+        uses: actions/download-artifact@v4
+        with:
+          name: dto-contract-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}
+          path: UsersAndPosts
+
+      - name: Validate downloaded dtos.json
+        run: |
+          test -f UsersAndPosts/dtos.json || (echo "dtos.json missing after download" && exit 1)
+          node -e "JSON.parse(require('fs').readFileSync('UsersAndPosts/dtos.json','utf8')); console.log('downloaded dtos.json OK');"
+
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
-          # Matrix-styrd Node-version
           node-version: ${{ matrix.node }}
-
-          # npm-cache: snabbare npm ci
           cache: "npm"
           cache-dependency-path: UsersAndPostsClient/package-lock.json
 
-      # Installera exakt de versioner som låsts i package-lock.json
       - name: Install client deps
         working-directory: UsersAndPostsClient
         run: npm ci
 
-      # Frontend lint i check-mode (ingen --fix, ingen formattering)
       - name: Lint client (ESLint)
         working-directory: UsersAndPostsClient
         run: npm run lint
 
-      # Generera TypeScript-typer från dtos.json (kontraktskedjans andra länk)
-      - name: Generate dtos.ts from generated dtos.json
+      - name: Generate dtos.ts from downloaded dtos.json
         working-directory: UsersAndPostsClient
         run: npm run gen:dtos
 
-      # Bygg klienten och skriv output till API:s wwwroot
-      # => publish-steget tar med frontend i samma deploybara bundle.
       - name: Build client (writes to API wwwroot)
         working-directory: UsersAndPostsClient
         run: npm run build
 
-      # Samma reproducerbarhets-gate för frontend-bygg:
-      # byggsteg ska inte smyga in ändringar i spårade filer.
       - name: Fail if NPM build changed tracked files
         run: |
           if ! git diff --quiet; then
@@ -209,32 +184,87 @@ jobs:
             exit 1
           fi
 
-      # =========================================================
-      # 4) Tester: verifiera backend efter att kontraktskedjan + klientbuild körts
-      # =========================================================
+      # ---------------------------------------------------------
+      # Artefakt 2: Frontend output (API:s wwwroot)
+      # Gör frontend-build till en "fysisk leverans" mellan jobb.
+      # ---------------------------------------------------------
+      - name: Upload artifact (wwwroot)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wwwroot-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}
+          path: UsersAndPosts/wwwroot
+
+
+  # ============================================================
+  # 3) TEST + PUBLISH
+  # ============================================================
+  test_publish:
+    name: Test + Publish (node=${{ matrix.node }}, dotnet=${{ matrix.dotnet }})
+    runs-on: ubuntu-latest
+    needs: [backend_contract, frontend_build]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["18.x", "20.x"]
+        dotnet: ["8.0.x", "9.0.x"]
+        exclude:
+          - node: "18.x"
+            dotnet: "9.0.x"
+          - node: "20.x"
+            dotnet: "8.0.x"
+
+    env:
+      VITE_API_BASE: /api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Konsumera DTO-kontraktet igen (för publish + för att lägga i out/)
+      - name: Download artifact (dto contract)
+        uses: actions/download-artifact@v4
+        with:
+          name: dto-contract-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}
+          path: UsersAndPosts
+
+      # Konsumera wwwroot från frontend-jobbet
+      - name: Download artifact (wwwroot)
+        uses: actions/download-artifact@v4
+        with:
+          name: wwwroot-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}
+          path: UsersAndPosts/wwwroot
+
+      - name: Setup .NET ${{ matrix.dotnet }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ matrix.dotnet }}
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            **/packages.lock.json
+
+      - name: Restore
+        run: dotnet restore UsersAndPosts.sln
+
+      - name: Build (Release)
+        run: dotnet build UsersAndPosts.sln -c Release --no-restore
+
       - name: Test
         run: dotnet test UsersAndPosts.sln -c Release --no-build
 
-      # =========================================================
-      # 5) Publish + artifact: skapa deploybar output
-      # =========================================================
       - name: Publish API
         run: dotnet publish UsersAndPosts/UsersAndPosts.csproj -c Release -o out --no-build
 
-      # Lägg kontraktet i publish-rot (nyttigt för inspektion/debug/deploy)
       - name: Copy dtos.json into publish root
         run: cp UsersAndPosts/dtos.json out/dtos.json
 
-      # Upload artifact: unik per matrix-kombination för att undvika krockar
       - name: Upload artifact (published app)
         uses: actions/upload-artifact@v4
         with:
           name: UsersAndPosts-publish-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}
           path: out
 
-      # =========================================================
-      # 6) Job summary: kort, mänskligt läsbar rapport i GitHub UI
-      # =========================================================
       - name: Job summary
         if: always()
         run: |
@@ -242,9 +272,9 @@ jobs:
             echo "## CI summary"
             echo ""
             echo "- Matrix: **.NET ${{ matrix.dotnet }}** × **Node ${{ matrix.node }}**"
-            echo "- ✅ Generated \`UsersAndPosts/dtos.json\` at build time"
-            echo "- ✅ Generated \`UsersAndPostsClient/src/generated/dtos.ts\` from that contract"
-            echo "- ✅ Built client into API \`wwwroot\`"
-            echo "- ✅ Built + tested + published API"
+            echo "- 📦 Consumed artifact: dto-contract → \`UsersAndPosts/dtos.json\`"
+            echo "- 📦 Produced artifact: wwwroot → \`UsersAndPosts/wwwroot\`"
+            echo "- ✅ Generated \`UsersAndPostsClient/src/generated/dtos.ts\` from the contract"
+            echo "- ✅ Tested + published API (with frontend in wwwroot)"
             echo "- 📦 Uploaded artifact: **UsersAndPosts-publish-dotnet${{ matrix.dotnet }}-node${{ matrix.node }}**"
           } >> "$GITHUB_STEP_SUMMARY"
