@@ -1,36 +1,85 @@
+# ============================================================
+# CI (Continuous Integration) för UsersAndPosts
+#
+# Målbild:
+# - Bygg och testa backend
+# - Bygg frontend och producera wwwroot
+# - Håll backend + frontend synkade via ett "kontrakt" (dtos.json)
+# - Gör säkerhets-/kvalitets-gates med SARIF till GitHub Code Scanning
+# - Producera en deploybar artefakt (publish/out)
+#
+# Viktig princip: CI ska vara deterministisk.
+# Det betyder bl.a. att:
+# - Build/generator får inte "råka" ändra spårade filer
+# - Samma commit ska ge samma artefakter
+# ============================================================
+
 name: CI
 
 on:
+  # Kör CI på alla PR:ar mot main (klassisk CI-trigger).
   pull_request:
     branches: ["main"]
+
+  # Push-trigger används här för test/experiment-branch ("noci").
+  # I en "riktig" mainline kan man i stället ha push på main,
+  # men här vill du uppenbart kunna slå på/av CI via branch.
   push:
     branches: ["noci"]
 
-# Behövs för att kunna ladda upp SARIF till GitHub Code Scanning
+# ============================================================
+# Permissions: minsta möjliga rättigheter för att kunna ladda upp SARIF.
+#
+# security-events: write krävs för att GitHub ska acceptera SARIF-upload
+# till Security → Code scanning.
+# ============================================================
 permissions:
   contents: read
   actions: read
   security-events: write
 
+# ============================================================
+# Concurrency: om någon pushar flera commits snabbt (eller uppdaterar en PR)
+# vill vi bara att senaste körningen ska "vinna".
+#
+# group: knyter ihop körningar per ref (branch/PR-ref)
+# cancel-in-progress: stoppar äldre körningar automatiskt
+# ============================================================
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# ============================================================
+# Gemensamma miljövariabler.
+# VITE_API_BASE används av frontend-bygget för att generera korrekt API-bas.
+# (Vite läser env vid build-time.)
+# ============================================================
 env:
   VITE_API_BASE: /api
 
 jobs:
   # ============================================================
   # 1) BACKEND -> KONTRAKT (dtos.json)
+  #
+  # Idén:
+  # - C# DTO-records är "source of truth"
+  # - En generator skapar dtos.json
+  # - dtos.json blir en artefakt som andra jobb konsumerar
+  #
+  # Detta ger en CI-driven kontraktskedja som motverkar "kontraktsdrift"
+  # mellan backend och frontend.
   # ============================================================
   backend_contract:
     name: Backend contract (dotnet=8.0.x)
     runs-on: ubuntu-latest
 
     steps:
+      # Hämtar repo-innehåll så vi kan bygga och generera kontrakt.
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Installerar .NET SDK (8.0.x) + aktiverar caching.
+      # cache-dependency-path pekar på csproj/lock-filer för att kunna återanvända packages.
       - name: Setup .NET 8.0.x
         uses: actions/setup-dotnet@v4
         with:
@@ -43,6 +92,14 @@ jobs:
       - name: Restore
         run: dotnet restore UsersAndPosts.sln
 
+      # ------------------------------------------------------------
+      # Security gate: faila om sårbara paket hittas.
+      #
+      # dotnet list package --vulnerable skriver en text-tabell.
+      # Vi gör en enkel text-gate genom att leta efter "vulnerab".
+      #
+      # OBS: Det här är medvetet "hårt": CI stoppar om dependency risk finns.
+      # ------------------------------------------------------------
       - name: NuGet vulnerable packages (fail if any)
         run: |
           set -e
@@ -50,9 +107,17 @@ jobs:
           echo "$OUT"
           echo "$OUT" | grep -qi "vulnerab" && (echo "Vulnerable packages found" && exit 1) || true
 
+      # Generatorn behöver ofta att lösningen är byggd (referenser/outputs).
       - name: Build (needed for generator)
         run: dotnet build UsersAndPosts.sln -c Release --no-restore
 
+      # ------------------------------------------------------------
+      # "Git diff-gate": CI ska vara ren.
+      #
+      # Om build påverkar spårade filer (t.ex. genererade outputs som råkar committas,
+      # felaktiga line endings, eller verktyg som skriver om filer),
+      # så vill vi hellre stoppa och göra det explicit än att låta det smyga in.
+      # ------------------------------------------------------------
       - name: Fail if dotnet build changed tracked files
         run: |
           if ! git diff --quiet; then
@@ -66,14 +131,18 @@ jobs:
             exit 1
           fi
 
+      # Skapar kontraktet dtos.json från C# DTOs.
       - name: Generate dtos.json from C# DTOs
         run: dotnet run -c Release --project UsersAndPosts.DtoContractGen
 
+      # Validering: filen måste finnas + vara giltig JSON.
+      # (JSON.parse är en snabb och enkel syntaktisk kontroll.)
       - name: Validate dtos.json exists and is valid JSON
         run: |
           test -f UsersAndPosts/dtos.json || (echo "dtos.json was not generated" && exit 1)
           node -e "JSON.parse(require('fs').readFileSync('UsersAndPosts/dtos.json','utf8')); console.log('dtos.json OK');"
 
+      # Ladda upp dtos.json som artefakt, så andra jobb kan ladda ner exakt samma kontrakt.
       - name: Upload artifact (dtos.json)
         uses: actions/upload-artifact@v4
         with:
@@ -83,6 +152,12 @@ jobs:
 
   # ============================================================
   # 2A) FRONTEND BUILD (parallellt med backend_test)
+  #
+  # "needs: backend_contract" betyder:
+  # - vi väntar på att kontraktet produceras
+  # - sedan bygger vi frontend med rätt DTO-typer
+  #
+  # Matrix på Node gör att ni fångar versionsskillnader tidigt.
   # ============================================================
   frontend_build:
     name: Frontend build (node=${{ matrix.node }})
@@ -98,12 +173,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Konsumera kontraktet som backend_contract producerade.
+      # Viktigt: samma dtos.json används i alla jobb → determinism.
       - name: Download artifact (dtos.json)
         uses: actions/download-artifact@v4
         with:
           name: contract-dtos-json
           path: UsersAndPosts
 
+      # Installerar Node + npm cache knuten till package-lock.
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v4
         with:
@@ -115,12 +193,22 @@ jobs:
         working-directory: UsersAndPostsClient
         run: npm ci
 
+      # Genererar TypeScript-typer från dtos.json.
+      # Detta är "frontend-sidan" av kontraktskedjan.
       - name: Generate dtos.ts from dtos.json
         working-directory: UsersAndPostsClient
         run: npm run gen:dtos
 
       # =========================================================
       # 🧾 SARIF: ESLint -> SARIF (rapport + gate)
+      #
+      # Varför två steg?
+      # - Vi vill ALLTID försöka generera och ladda upp SARIF (för visibility)
+      # - Men vi vill OCKSÅ kunna faila bygget om lint hittar problem (gate)
+      #
+      # Därför:
+      # - vi fångar exit code och fortsätter (exit 0)
+      # - sedan failar vi explicit i ett separat steg
       # =========================================================
       - name: Run ESLint (emit SARIF)
         id: eslint
@@ -136,6 +224,9 @@ jobs:
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           exit 0
 
+      # Upload SARIF:
+      # - always(): vi vill se rapporten även om lint misslyckas
+      # - villkoret skyddar mot fork-PR där permissions ofta saknas
       - name: Upload SARIF (eslint)
         if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: github/codeql-action/upload-sarif@v3
@@ -143,16 +234,20 @@ jobs:
           sarif_file: ${{ github.workspace }}/artifacts/sarif/eslint-node${{ matrix.node }}.sarif
           category: eslint-node${{ matrix.node }}
 
+      # Gate: om lint hittade problem → faila jobbet.
       - name: Fail if ESLint found issues
         if: ${{ steps.eslint.outputs.exit_code != '0' }}
         run: |
           echo "ESLint found issues (exit=${{ steps.eslint.outputs.exit_code }})"
           exit 1
 
+      # Bygger frontend och skriver output till API-projektets wwwroot.
       - name: Build client (writes to API wwwroot)
         working-directory: UsersAndPostsClient
         run: npm run build
 
+      # Git diff-gate även här:
+      # Om build "smutsar ner" repo med spårade filer så vill ni fånga det direkt.
       - name: Fail if NPM build changed tracked files
         run: |
           if ! git diff --quiet; then
@@ -166,6 +261,8 @@ jobs:
             exit 1
           fi
 
+      # Upload av wwwroot som artefakt per Node-version.
+      # Detta gör att publish-jobbet kan välja en "canonical" frontend (här node20.x).
       - name: Upload artifact (wwwroot)
         uses: actions/upload-artifact@v4
         with:
@@ -173,6 +270,7 @@ jobs:
           path: UsersAndPosts/wwwroot
           if-no-files-found: error
 
+      # Sammanfattning i Actions UI (GitHub Step Summary).
       - name: Job summary
         if: always()
         run: |
@@ -195,6 +293,9 @@ jobs:
 
   # ============================================================
   # 2B) BACKEND TEST (parallellt med frontend_build)
+  #
+  # Kör tests i en matrix (.NET 8 och 9) för kompatibilitet.
+  # Hämtar dtos.json mest som "kontraktsbevis" och för att hålla kedjan intakt.
   # ============================================================
   backend_test:
     name: Backend test (dotnet=${{ matrix.dotnet }})
@@ -232,7 +333,12 @@ jobs:
         run: dotnet build UsersAndPosts.sln -c Release --no-restore
 
       # =========================================================
-      # 🔐 Beräkna unik SQLite-path per parallellt jobb
+      # 🔐 Unik SQLite-path per parallellt jobb
+      #
+      # När CI kör i matrix (eller flera workflows samtidigt) kan SQLite låsa filen.
+      # Genom att skapa en unik DB-fil per job undviker ni låsningsproblem och flakiness.
+      #
+      # BASE kommer från secret, så ni kan styra var DB-filer hamnar utan att hårdkoda.
       # =========================================================
       - name: Compute SQLite DB path
         id: db
@@ -244,6 +350,7 @@ jobs:
           mkdir -p "$(dirname "$UNIQUE")"
           touch "$UNIQUE"
 
+      # Test får Db__Path injicerat som env (binder till konfig i .NET).
       - name: Test
         env:
           Db__Path: ${{ steps.db.outputs.path }}
@@ -267,6 +374,12 @@ jobs:
 
   # ============================================================
   # 2C) CODEQL (C#) -> SARIF till Code Scanning
+  #
+  # CodeQL är en "djupare" statisk analys än t.ex. lint:
+  # - söker mönster för sårbarheter och buggar i C#-koden
+  # - laddar upp resultat som SARIF till GitHub Security → Code scanning
+  #
+  # Notera fork-PR-villkoret: utan rätt permissions kan SARIF-upload faila.
   # ============================================================
   codeql_dotnet:
     name: CodeQL (C#) SARIF
@@ -284,9 +397,11 @@ jobs:
         with:
           languages: csharp
 
+      # CodeQL försöker bygga projektet med rekommenderad strategi.
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
 
+      # Skapar och laddar upp SARIF-resultat till Code Scanning.
       - name: Analyze
         uses: github/codeql-action/analyze@v3
         with:
@@ -308,6 +423,14 @@ jobs:
 
   # ============================================================
   # 3) PUBLISH (väntar på både frontend + backend_test + CodeQL)
+  #
+  # needs: [frontend_build, backend_test, codeql_dotnet]
+  # betyder:
+  # - vi publicerar INTE om tester eller scanning inte är klara
+  # - publish är alltså en "sammanfogande" kvalitetsport
+  #
+  # Vi väljer node20.x som canonical frontend-build.
+  # Det gör att publish alltid får ett enda, definierat wwwroot.
   # ============================================================
   publish:
     name: Publish (dotnet=8.0.x, wwwroot=node20.x)
@@ -324,6 +447,7 @@ jobs:
           name: contract-dtos-json
           path: UsersAndPosts
 
+      # Här gör ni ett aktivt val: publish använder node20.x som "rätt" build.
       - name: Download artifact (wwwroot from node20)
         uses: actions/download-artifact@v4
         with:
@@ -345,12 +469,17 @@ jobs:
       - name: Build
         run: dotnet build UsersAndPosts.sln -c Release --no-restore
 
+      # dotnet publish producerar en körbar output (self-contained appstruktur),
+      # och inkluderar statiska filer i wwwroot.
       - name: Publish API (includes wwwroot)
         run: dotnet publish UsersAndPosts/UsersAndPosts.csproj -c Release -o out --no-build
 
+      # Kopierar kontraktet till publish-root.
+      # Praktiskt för debugging, och kan användas i deployment/test.
       - name: Copy dtos.json into publish root
         run: cp UsersAndPosts/dtos.json out/dtos.json
 
+      # Upload av deploybar artefakt.
       - name: Upload artifact (published app)
         uses: actions/upload-artifact@v4
         with:
