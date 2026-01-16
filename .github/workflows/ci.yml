@@ -112,7 +112,6 @@ jobs:
         id: eslint
         working-directory: UsersAndPostsClient
         run: |
-          # ✅ FIX: skriv SARIF till en absolut path under workspace
           mkdir -p "$GITHUB_WORKSPACE/artifacts/sarif"
           npm i --no-save @microsoft/eslint-formatter-sarif
 
@@ -127,7 +126,6 @@ jobs:
         if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: github/codeql-action/upload-sarif@v3
         with:
-          # ✅ FIX: använd workspace-baserad path
           sarif_file: ${{ github.workspace }}/artifacts/sarif/eslint-node${{ matrix.node }}.sarif
           category: eslint-node${{ matrix.node }}
 
@@ -188,18 +186,22 @@ jobs:
       # =========================================================
       - name: Build (emit SARIF)
         run: |
-          # ✅ FIX: skapa katalogen i workspace
           mkdir -p "$GITHUB_WORKSPACE/artifacts/sarif"
 
-          # ✅ FIX: skriv ErrorLog till absolut path (inte relativt projektmapp)
+          # ✅ PATCH: hela /p:... som en argumentsträng så version=2.1 verkligen tillhör ErrorLog
           dotnet build UsersAndPosts.sln -c Release --no-restore \
-            /p:ErrorLog="$GITHUB_WORKSPACE/artifacts/sarif/dotnet-${{ matrix.dotnet }}.sarif,version=2.1"
+            "/p:ErrorLog=$GITHUB_WORKSPACE/artifacts/sarif/dotnet-${{ matrix.dotnet }}.sarif,version=2.1"
+
+          # (extra) faila tidigt med tydligt fel om filen saknas/är tom/inte JSON
+          test -s "$GITHUB_WORKSPACE/artifacts/sarif/dotnet-${{ matrix.dotnet }}.sarif" \
+            || (echo "ERROR: dotnet SARIF missing or empty" && exit 1)
+
+          node -e "JSON.parse(require('fs').readFileSync(process.env.GITHUB_WORKSPACE + '/artifacts/sarif/dotnet-${{ matrix.dotnet }}.sarif','utf8')); console.log('dotnet SARIF JSON OK');"
 
       - name: Upload SARIF (dotnet)
         if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: github/codeql-action/upload-sarif@v3
         with:
-          # ✅ FIX: använd workspace-baserad path
           sarif_file: ${{ github.workspace }}/artifacts/sarif/dotnet-${{ matrix.dotnet }}.sarif
           category: dotnet-${{ matrix.dotnet }}
 
