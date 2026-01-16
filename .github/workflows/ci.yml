@@ -53,6 +53,19 @@ jobs:
       - name: Build (needed for generator)
         run: dotnet build UsersAndPosts.sln -c Release --no-restore
 
+      - name: Fail if dotnet build changed tracked files
+        run: |
+          if ! git diff --quiet; then
+            echo "ERROR: build modified tracked files."
+            echo ""
+            echo "Changed files:"
+            git diff --name-only
+            echo ""
+            echo "Diff (first 200 lines):"
+            git diff | head -n 200
+            exit 1
+          fi
+
       - name: Generate dtos.json from C# DTOs
         run: dotnet run -c Release --project UsersAndPosts.DtoContractGen
 
@@ -139,6 +152,19 @@ jobs:
       - name: Build client (writes to API wwwroot)
         working-directory: UsersAndPostsClient
         run: npm run build
+
+      - name: Fail if NPM build changed tracked files
+        run: |
+          if ! git diff --quiet; then
+            echo "ERROR: build modified tracked files."
+            echo ""
+            echo "Changed files:"
+            git diff --name-only
+            echo ""
+            echo "Diff (first 200 lines):"
+            git diff | head -n 200
+            exit 1
+          fi
 
       - name: Upload artifact (wwwroot)
         uses: actions/upload-artifact@v4
@@ -239,7 +265,6 @@ jobs:
             echo "- Unique DB per job: ✅ (prevents parallel locking issues)"
           } >> "$GITHUB_STEP_SUMMARY"
 
-
   # ============================================================
   # 2C) CODEQL (C#) -> SARIF till Code Scanning
   # ============================================================
@@ -280,7 +305,6 @@ jobs:
             echo ""
             echo "View results in **Security → Code scanning**."
           } >> "$GITHUB_STEP_SUMMARY"
-
 
   # ============================================================
   # 3) PUBLISH (väntar på både frontend + backend_test + CodeQL)
@@ -344,4 +368,3 @@ jobs:
             echo "- ✅ Copied \`dtos.json\` into publish root"
             echo "- 📦 Uploaded artifact: **UsersAndPosts-publish**"
           } >> "$GITHUB_STEP_SUMMARY"
-
