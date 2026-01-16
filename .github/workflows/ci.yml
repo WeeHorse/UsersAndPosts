@@ -25,7 +25,7 @@ on:
   # I en "riktig" mainline kan man i stället ha push på main,
   # men här vill du uppenbart kunna slå på/av CI via branch.
   push:
-    branches: ["noci"]
+    branches: ["fullci"]
 
 # ============================================================
 # Permissions: minsta möjliga rättigheter för att kunna ladda upp SARIF.
