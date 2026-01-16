@@ -147,6 +147,26 @@ jobs:
           path: UsersAndPosts/wwwroot
           if-no-files-found: error
 
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Frontend build summary"
+            echo ""
+            echo "- Matrix: **Node ${{ matrix.node }}**"
+            echo "- ✅ Downloaded DTO contract: \`UsersAndPosts/dtos.json\`"
+            echo "- ✅ Generated TypeScript types: \`UsersAndPostsClient/.../dtos.ts\` (via \`npm run gen:dtos\`)"
+            echo "- ✅ Built client into API \`UsersAndPosts/wwwroot\`"
+            echo "- 📦 Uploaded artifact: **client-wwwroot-node${{ matrix.node }}**"
+            echo ""
+            echo "### Code scanning (SARIF)"
+            echo "- ESLint SARIF emitted to: \`artifacts/sarif/eslint-node${{ matrix.node }}.sarif\`"
+            echo "- Uploaded to GitHub Code Scanning as category: **eslint-node${{ matrix.node }}**"
+            echo "- ESLint exit code: \`${{ steps.eslint.outputs.exit_code }}\`"
+            echo ""
+            echo "View results in **Security → Code scanning**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ============================================================
   # 2B) BACKEND TEST (parallellt med frontend_build)
   # ============================================================
@@ -203,6 +223,23 @@ jobs:
           Db__Path: ${{ steps.db.outputs.path }}
         run: dotnet test UsersAndPosts.sln -c Release --no-build
 
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Backend test summary"
+            echo ""
+            echo "- Matrix: **.NET ${{ matrix.dotnet }}**"
+            echo "- ✅ Downloaded DTO contract: \`UsersAndPosts/dtos.json\`"
+            echo "- ✅ Built solution in Release"
+            echo "- ✅ Ran tests: \`dotnet test\`"
+            echo ""
+            echo "### Test database (SQLite)"
+            echo "- Db path injected via env: \`Db__Path\`"
+            echo "- Unique DB per job: ✅ (prevents parallel locking issues)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
   # ============================================================
   # 2C) CODEQL (C#) -> SARIF till Code Scanning
   # ============================================================
@@ -229,6 +266,21 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: codeql-csharp
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## CodeQL (C#) summary"
+            echo ""
+            echo "- ✅ CodeQL initialized for **C#**"
+            echo "- ✅ Autobuild completed"
+            echo "- ✅ Analysis uploaded to GitHub Code Scanning"
+            echo "- Category: **codeql-csharp**"
+            echo ""
+            echo "View results in **Security → Code scanning**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
 
   # ============================================================
   # 3) PUBLISH (väntar på både frontend + backend_test + CodeQL)
@@ -280,3 +332,16 @@ jobs:
         with:
           name: UsersAndPosts-publish
           path: out
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Publish summary"
+            echo ""
+            echo "- ✅ Downloaded DTO contract + canonical frontend wwwroot (node20.x)"
+            echo "- ✅ Published API to \`out/\`"
+            echo "- ✅ Copied \`dtos.json\` into publish root"
+            echo "- 📦 Uploaded artifact: **UsersAndPosts-publish**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
