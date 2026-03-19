@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using UsersAndPosts.User;
 
 namespace UsersAndPosts.Post;
@@ -27,16 +28,21 @@ public static class PostEndpoints
       return Results.Ok(dtos);
     });
 
-    app.MapPost("posts", async (PostDtos.PostCreateDto dto, PostRepo repo, UserRepo userRepo) =>
+    app.MapPost("posts", async (PostDtos.PostCreateDto dto, PostRepo repo, UserRepo userRepo, ClaimsPrincipal user) =>
     {
-      // “Business rule”: Post måste ha en existerande user
-      var user = await userRepo.GetByIdAsync(dto.UserId);
-      if (user is null) return Results.BadRequest(new { error = "User does not exist." });
+      var userIdClaim = user.FindFirstValue(ClaimTypes.NameIdentifier);
+      if (!int.TryParse(userIdClaim, out var userId))
+      {
+        return Results.Unauthorized();
+      }
 
-      var (ok, error, newId) = await repo.CreateAsync(dto.UserId, dto.Content);
+      var existingUser = await userRepo.GetByIdAsync(userId);
+      if (existingUser is null) return Results.Unauthorized();
+
+      var (ok, error, newId) = await repo.CreateAsync(userId, dto.Content);
       if (!ok) return Results.BadRequest(new { error });
 
       return Results.Created($"posts/{newId}", new { id = newId });
-    });
+    }).RequireAuthorization();
   }
 }

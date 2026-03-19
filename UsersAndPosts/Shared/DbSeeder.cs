@@ -13,10 +13,25 @@ public static class DbSeeder
         CREATE TABLE IF NOT EXISTS Users (
             Id INTEGER PRIMARY KEY AUTOINCREMENT,
             Username TEXT NOT NULL UNIQUE,
+        Password TEXT NOT NULL,
             DisplayName TEXT NOT NULL,
             CreatedAtUtc TEXT NOT NULL
         );
         """);
+
+    // Migration for existing DB files created before Password existed
+    var hasPasswordColumn = await ScalarIntAsync(conn, """
+      SELECT COUNT(1)
+      FROM pragma_table_info('Users')
+      WHERE name = 'Password';
+      """);
+    if (hasPasswordColumn == 0)
+    {
+      await ExecuteAsync(conn, "ALTER TABLE Users ADD COLUMN Password TEXT NOT NULL DEFAULT ''; ");
+    }
+
+    // Ensure no empty passwords remain after migration
+    await ExecuteAsync(conn, "UPDATE Users SET Password = Username WHERE Password = ''; ");
 
     await ExecuteAsync(conn, """
         CREATE TABLE IF NOT EXISTS Posts (
@@ -33,12 +48,12 @@ public static class DbSeeder
     if (userCount == 0)
     {
       await ExecuteAsync(conn,
-          "INSERT INTO Users (Username, DisplayName, CreatedAtUtc) VALUES (@u, @d, @c);",
-          ("@u", "alice"), ("@d", "Alice"), ("@c", DateTime.UtcNow.ToString("O")));
+          "INSERT INTO Users (Username, Password, DisplayName, CreatedAtUtc) VALUES (@u, @p, @d, @c);",
+          ("@u", "alice"), ("@p", "abc123"), ("@d", "Alice"), ("@c", DateTime.UtcNow.ToString("O")));
 
       await ExecuteAsync(conn,
-          "INSERT INTO Users (Username, DisplayName, CreatedAtUtc) VALUES (@u, @d, @c);",
-          ("@u", "bob"), ("@d", "Bob"), ("@c", DateTime.UtcNow.ToString("O")));
+          "INSERT INTO Users (Username, Password, DisplayName, CreatedAtUtc) VALUES (@u, @p, @d, @c);",
+          ("@u", "bob"), ("@p", "abc123"), ("@d", "Bob"), ("@c", DateTime.UtcNow.ToString("O")));
     }
 
     // Seed Posts if empty

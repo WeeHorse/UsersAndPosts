@@ -12,10 +12,9 @@ export async function userDetailLoader({ params }: LoaderFunctionArgs) {
 }
 
 export async function userDetailAction({ request, params }: ActionFunctionArgs) {
-  const userId = Number(params.userId);
   const data = await request.formData();
   const content = String(data.get("content") ?? "");
-  await createPost({ userId, content });
+  await createPost({ content });
   return null;
 }
 

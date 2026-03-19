@@ -1,5 +1,5 @@
 import { createBrowserRouter } from "react-router-dom";
-import { Root } from "./routes/Root";
+import { Root, rootLoader, rootAction } from "./routes/Root";
 import { Home } from "./routes/Home";
 import { Users, usersLoader, usersAction } from "./routes/Users";
 import { UserDetail, userDetailLoader, userDetailAction } from "./routes/UserDetail";
@@ -9,6 +9,8 @@ export const router = createBrowserRouter([
   {
     path: "/",
     element: <Root />,
+    loader: rootLoader,
+    action: rootAction,
     children: [
       { index: true, element: <Home /> },
       {

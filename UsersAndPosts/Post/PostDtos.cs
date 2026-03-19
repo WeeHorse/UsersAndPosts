@@ -15,7 +15,6 @@ public static class PostDtos
 
   [DtoContract("Post")]
   public sealed record PostCreateDto(
-      int UserId,
       string Content
   );
 }

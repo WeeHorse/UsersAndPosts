@@ -2,11 +2,33 @@ using UsersAndPosts.Shared;
 using UsersAndPosts.User;
 using UsersAndPosts.Post;
 using Microsoft.AspNetCore.Http.Json;
+using Microsoft.AspNetCore.Authentication.Cookies;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services
+        .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+        .AddCookie(options =>
+        {
+            options.Cookie.Name = "usersandposts.session";
+            options.SlidingExpiration = true;
+            options.Events = new CookieAuthenticationEvents
+            {
+                OnRedirectToLogin = context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return Task.CompletedTask;
+                },
+                OnRedirectToAccessDenied = context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return Task.CompletedTask;
+                }
+            };
+        });
+builder.Services.AddAuthorization();
 
 builder.Services.AddSingleton<Db>();
 builder.Services.AddSingleton<UserRepo>();
@@ -16,6 +38,9 @@ var app = builder.Build();
 
 app.UseSwagger();
 app.UseSwaggerUI();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 // 1) Servera klienten från wwwroot på /
 app.UseDefaultFiles();

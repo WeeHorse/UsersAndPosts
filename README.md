@@ -45,6 +45,58 @@ API:
 * `GET http://localhost:5000/api/users`
 * `GET http://localhost:5000/api/posts`
 * `GET http://localhost:5000/api/dtos`
+* `POST http://localhost:5000/api/auth/login`
+* `POST http://localhost:5000/api/auth/logout`
+* `GET http://localhost:5000/api/auth/me`
+
+### Auth (session/cookie)
+
+API:t använder cookie-baserad session-auth för skrivning av inlägg.
+
+**Regler:**
+
+* `GET /api/posts` och andra läs-endpoints är öppna utan inloggning.
+* `POST /api/posts` kräver inloggning (session-cookie).
+* Författare på nya inlägg tas alltid från inloggad session (inte från request-body).
+
+**Logga in (exempel):**
+
+```bash
+curl -i -c cookies.txt \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"alice"}' \
+  http://localhost:5000/api/auth/login
+```
+
+**Skapa user (exempel):**
+
+```bash
+curl -i \
+  -H "Content-Type: application/json" \
+  -d '{"username":"charlie","password":"charlie","displayName":"Charlie"}' \
+  http://localhost:5000/api/users
+```
+
+**Kolla aktiv session:**
+
+```bash
+curl -i -b cookies.txt http://localhost:5000/api/auth/me
+```
+
+**Skapa inlägg som inloggad user:**
+
+```bash
+curl -i -b cookies.txt \
+  -H "Content-Type: application/json" \
+  -d '{"content":"Hej från session-auth"}' \
+  http://localhost:5000/api/posts
+```
+
+**Logga ut:**
+
+```bash
+curl -i -b cookies.txt -X POST http://localhost:5000/api/auth/logout
+```
 
 ### 2) Starta klienten i dev (port 3000)
 
@@ -140,6 +192,8 @@ cd UsersAndPostsClient && npm run dev
 ## Noteringar
 
 * SQLite-databasen skapas/seedas automatiskt av API:t.
+* Password lagras i klartext (plain text) i databasen för detta exempel.
+* Inlägg kan läsas utan inloggning, men att skapa inlägg kräver inloggning via session-cookie (`/api/auth/login`).
 * `VITE_API_BASE` kan sättas om du vill peka klienten mot annat API än `/api` (default är `/api`).
 * `dtos.json` används av `/api/dtos` och som input till genereringen av TypeScript-typer.
 

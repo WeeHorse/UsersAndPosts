@@ -11,9 +11,10 @@ export async function usersLoader(_: LoaderFunctionArgs) {
 export async function usersAction({ request }: ActionFunctionArgs) {
   const data = await request.formData();
   const username = String(data.get("username") ?? "");
+  const password = String(data.get("password") ?? "");
   const displayName = String(data.get("displayName") ?? "");
 
-  await createUser({ username, displayName });
+  await createUser({ username, password, displayName });
   return null;
 }
 
@@ -40,6 +41,12 @@ export function Users() {
             </label>
           </div>
           <div>
+            <label>
+              Password
+              <input name="password" type="password" placeholder="secret" />
+            </label>
+          </div>
+          <div>
             <button type="submit">Create</button>
           </div>
         </Form>
@@ -52,7 +59,6 @@ export function Users() {
               <strong>{u.displayName}</strong> <small>@{u.username}</small>
               <div><small>Created: {new Date(u.createdAtUtc).toLocaleString()}</small></div>
             </div>
-            <Link to={`/users/${u.id}`}>Open</Link>
           </div>
         </div>
       ))}

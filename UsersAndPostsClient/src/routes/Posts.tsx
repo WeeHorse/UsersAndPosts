@@ -1,4 +1,4 @@
-import { Form, Link, useLoaderData } from "react-router-dom";
+import { Form, useLoaderData } from "react-router-dom";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router-dom";
 import { getPosts, createPost } from "../api/posts";
 import type { PostDto } from "../generated/dtos";
@@ -10,9 +10,8 @@ export async function postsLoader(_: LoaderFunctionArgs) {
 
 export async function postsAction({ request }: ActionFunctionArgs) {
   const data = await request.formData();
-  const userId = Number(data.get("userId"));
   const content = String(data.get("content") ?? "");
-  await createPost({ userId, content });
+  await createPost({ content });
   return null;
 }
 
@@ -32,12 +31,6 @@ export function Posts() {
         <Form method="post" className="row">
           <div>
             <label>
-              UserId
-              <input name="userId" type="number" min={1} placeholder="1" />
-            </label>
-          </div>
-          <div>
-            <label>
               Content
               <input name="content" placeholder="Hello..." />
             </label>
@@ -46,7 +39,7 @@ export function Posts() {
             <button type="submit">Create</button>
           </div>
         </Form>
-        <p><small>Tips: gå via <Link to="/users">Users</Link> och öppna en user för att posta “rätt”.</small></p>
+        <p><small>Du måste vara inloggad för att skapa inlägg.</small></p>
       </div>
 
       {posts.map((p) => (
