@@ -145,11 +145,6 @@ cd UsersAndPostsClient && npm run dev
 
 ---
 
-Perfekt – här är ett **kort, tydligt tillägg** som du kan klistra in i README:n, t.ex. **efter “Noteringar”** eller som en egen sektion nära slutet.
-Det beskriver **vad CI gör och varför**, utan att gå in på deploy.
-
----
-
 ## CI (Continuous Integration)
 
 Projektet innehåller en GitHub Actions-pipeline som automatiskt verifierar att **backend, kontrakt och frontend hänger ihop** vid varje push och pull request mot `main`.
