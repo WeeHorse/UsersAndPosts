@@ -3,11 +3,43 @@ using UsersAndPosts.User;
 using UsersAndPosts.Post;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "UsersAndPosts API",
+        Version = "v1",
+        Description = "Minimal API for users, posts, and session authentication."
+    });
+
+    options.AddSecurityDefinition("cookieAuth", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.ApiKey,
+        In = ParameterLocation.Cookie,
+        Name = "usersandposts.session",
+        Description = "Session cookie set by POST /api/auth/login"
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "cookieAuth"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 builder.Services
         .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
         .AddCookie(options =>

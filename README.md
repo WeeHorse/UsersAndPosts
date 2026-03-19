@@ -40,14 +40,114 @@ Från repo-roten:
 dotnet run --project UsersAndPosts
 ````
 
-API:
+API-bas: `http://localhost:5000/api`
 
-* `GET http://localhost:5000/api/users`
-* `GET http://localhost:5000/api/posts`
-* `GET http://localhost:5000/api/dtos`
-* `POST http://localhost:5000/api/auth/login`
-* `POST http://localhost:5000/api/auth/logout`
-* `GET http://localhost:5000/api/auth/me`
+### Swagger / OpenAPI
+
+Swagger är aktiverat i API:t och finns tillgängligt när servern kör.
+
+* Swagger UI: `http://localhost:5000/swagger`
+* OpenAPI JSON: `http://localhost:5000/swagger/v1/swagger.json`
+
+**Tips för auth i Swagger:**
+
+* Börja med att köra `POST /api/auth/login` i Swagger (med username/password).
+* Session-cookien (`usersandposts.session`) sätts av svaret.
+* Därefter kan du testa skyddade endpoints som `POST /api/posts` i samma browser-session.
+
+### Full REST-route referens
+
+| Method | Route | Auth | Success | Vanliga fel |
+|---|---|---|---|---|
+| POST | `/api/auth/login` | Nej | `200` (`SessionUserDto`) | `400` |
+| POST | `/api/auth/logout` | Nej | `204` | - |
+| GET | `/api/auth/me` | Session-cookie | `200` (`SessionUserDto`) | `401` |
+| GET | `/api/users` | Nej | `200` (`UserDto[]`) | - |
+| GET | `/api/users/{id}` | Nej | `200` (`UserDto`) | `404` |
+| POST | `/api/users` | Nej | `201` (`UserDto`) | `400` |
+| GET | `/api/posts` | Nej | `200` (`PostDto[]`) | - |
+| GET | `/api/users/{userId}/posts` | Nej | `200` (`PostDto[]`) | `404` |
+| POST | `/api/posts` | Session-cookie | `201` (`{ id }`) | `400`, `401` |
+| GET | `/api/dtos` | Nej | `200` (`dtos.json`) | - |
+
+#### Auth
+
+**POST `/api/auth/login`**
+
+* Auth: Nej
+* Body: `{"username":"string","password":"string"}`
+* 200: `SessionUserDto`
+* 400: valideringsfel eller felaktiga credentials
+
+**POST `/api/auth/logout`**
+
+* Auth: Nej (idempotent, tömmer cookie om den finns)
+* Body: ingen
+* 204: utloggad
+
+**GET `/api/auth/me`**
+
+* Auth: Session-cookie (om inloggad)
+* Body: ingen
+* 200: `SessionUserDto`
+* 401: ej inloggad/ogiltig session
+
+#### Users
+
+**GET `/api/users`**
+
+* Auth: Nej
+* Body: ingen
+* 200: `UserDto[]`
+
+**GET `/api/users/{id}`**
+
+* Auth: Nej
+* Path-param: `id` (int)
+* Body: ingen
+* 200: `UserDto`
+* 404: user finns inte
+
+**POST `/api/users`**
+
+* Auth: Nej
+* Body: `{"username":"string","password":"string","displayName":"string"}`
+* 201: skapad `UserDto`
+* 400: valideringsfel (t.ex. tomma fält, duplicate username)
+
+#### Posts
+
+**GET `/api/posts`**
+
+* Auth: Nej
+* Body: ingen
+* 200: `PostDto[]`
+
+**GET `/api/users/{userId}/posts`**
+
+* Auth: Nej
+* Path-param: `userId` (int)
+* Body: ingen
+* 200: `PostDto[]`
+* 404: user finns inte
+
+**POST `/api/posts`**
+
+* Auth: Ja (session-cookie krävs)
+* Body: `{"content":"string"}`
+* 201: `{ "id": number }`
+* 400: valideringsfel (t.ex. tom content)
+* 401: saknad/ogiltig session
+
+> `POST /api/posts` ignorerar klient-identitet och sätter alltid författare från inloggad session.
+
+#### Contract
+
+**GET `/api/dtos`**
+
+* Auth: Nej
+* Body: ingen
+* 200: rå JSON för DTO-kontraktet (`dtos.json`)
 
 ### Auth (session/cookie)
 
