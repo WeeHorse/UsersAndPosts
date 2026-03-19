@@ -289,6 +289,57 @@ cd UsersAndPostsClient && npm run dev
 
 ---
 
+## Postman: standardtester
+
+Repo:t innehåller en färdig Postman-collection med grundläggande API-tester:
+
+* Fil: `postman/UsersAndPosts.standard-tests.postman_collection.json`
+* Bas-URL via collection-variabel: `baseUrl` (default `http://localhost:5000`)
+
+### Vad som testas
+
+* Publika läs-endpoints (`/api/users`, `/api/posts`, `/api/dtos`)
+* Skapa user med unik testdata
+* Login/logout-session via cookie
+* Skyddad skrivning (`POST /api/posts`) fungerar när inloggad
+* Skyddad skrivning returnerar `401` när utloggad
+
+### Körning
+
+1. Starta API:t lokalt (`dotnet run --project UsersAndPosts`).
+2. Importera collection-filen i Postman.
+3. Kör hela collectionen i Collection Runner i ordning (01 → 12).
+4. Verifiera att alla requests får gröna tester.
+
+### Newman (CLI / CI)
+
+Installera Newman i projektet:
+
+```bash
+npm install newman
+```
+
+(Eller globalt om du vill)
+
+```bash
+npm install -g newman
+```
+
+Kör samlingen mot lokal API-server:
+
+```bash
+newman run postman/UsersAndPosts.standard-tests.postman_collection.json
+```
+
+Kör med explicit baseUrl (t.ex. i CI eller mot annan miljö):
+
+```bash
+newman run postman/UsersAndPosts.standard-tests.postman_collection.json \
+  --env-var baseUrl=http://localhost:5000
+```
+
+---
+
 ## Noteringar
 
 * SQLite-databasen skapas/seedas automatiskt av API:t.
