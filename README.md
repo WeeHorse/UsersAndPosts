@@ -13,6 +13,7 @@ Ett minimalt fullstack-exempel med:
 UsersAndPosts.sln
 UsersAndPosts/                # API (serverar även statiska filer i wwwroot)
 UsersAndPostsClient/          # React/Vite-klient
+UsersAndPosts.E2E/            # Playwright e2e (separat projekt)
 UsersAndPosts.DtoContractGen/ # Tool som genererar dtos.json från C# DTOs
 
 ```
@@ -51,23 +52,23 @@ Swagger är aktiverat i API:t och finns tillgängligt när servern kör.
 
 **Tips för auth i Swagger:**
 
-* Börja med att köra `POST /api/auth/login` i Swagger (med username/password).
-* Session-cookien (`usersandposts.session`) sätts av svaret.
-* Därefter kan du testa skyddade endpoints som `POST /api/posts` i samma browser-session.
+* Kör `POST /api/auth/login` i Swagger (med username/password) och kopiera `accessToken` från svaret.
+* Klicka på **Authorize** i Swagger UI och klistra in token som `Bearer <token>`.
+* Därefter kan du testa skyddade endpoints som `POST /api/posts`.
 
 ### Full REST-route referens
 
 | Method | Route | Auth | Success | Vanliga fel |
 |---|---|---|---|---|
-| POST | `/api/auth/login` | Nej | `200` (`SessionUserDto`) | `400` |
+| POST | `/api/auth/login` | Nej | `200` (`AuthLoginResponseDto`) | `400` |
 | POST | `/api/auth/logout` | Nej | `204` | - |
-| GET | `/api/auth/me` | Session-cookie | `200` (`SessionUserDto`) | `401` |
+| GET | `/api/auth/me` | Bearer JWT | `200` (`SessionUserDto`) | `401` |
 | GET | `/api/users` | Nej | `200` (`UserDto[]`) | - |
 | GET | `/api/users/{id}` | Nej | `200` (`UserDto`) | `404` |
 | POST | `/api/users` | Nej | `201` (`UserDto`) | `400` |
 | GET | `/api/posts` | Nej | `200` (`PostDto[]`) | - |
 | GET | `/api/users/{userId}/posts` | Nej | `200` (`PostDto[]`) | `404` |
-| POST | `/api/posts` | Session-cookie | `201` (`{ id }`) | `400`, `401` |
+| POST | `/api/posts` | Bearer JWT | `201` (`{ id }`) | `400`, `401` |
 | GET | `/api/dtos` | Nej | `200` (`dtos.json`) | - |
 
 #### Auth
@@ -76,7 +77,7 @@ Swagger är aktiverat i API:t och finns tillgängligt när servern kör.
 
 * Auth: Nej
 * Body: `{"username":"string","password":"string"}`
-* 200: `SessionUserDto`
+* 200: `AuthLoginResponseDto` med `accessToken`, `tokenType`, `expiresInSeconds`, `user`
 * 400: valideringsfel eller felaktiga credentials
 
 **POST `/api/auth/logout`**
@@ -87,10 +88,10 @@ Swagger är aktiverat i API:t och finns tillgängligt när servern kör.
 
 **GET `/api/auth/me`**
 
-* Auth: Session-cookie (om inloggad)
+* Auth: `Authorization: Bearer <token>`
 * Body: ingen
 * 200: `SessionUserDto`
-* 401: ej inloggad/ogiltig session
+* 401: ej inloggad/ogiltig token
 
 #### Users
 
@@ -133,11 +134,11 @@ Swagger är aktiverat i API:t och finns tillgängligt när servern kör.
 
 **POST `/api/posts`**
 
-* Auth: Ja (session-cookie krävs)
+* Auth: Ja (`Authorization: Bearer <token>` krävs)
 * Body: `{"content":"string"}`
 * 201: `{ "id": number }`
 * 400: valideringsfel (t.ex. tom content)
-* 401: saknad/ogiltig session
+* 401: saknad/ogiltig token
 
 > `POST /api/posts` ignorerar klient-identitet och sätter alltid författare från inloggad session.
 
@@ -149,20 +150,20 @@ Swagger är aktiverat i API:t och finns tillgängligt när servern kör.
 * Body: ingen
 * 200: rå JSON för DTO-kontraktet (`dtos.json`)
 
-### Auth (session/cookie)
+### Auth (JWT/Bearer)
 
-API:t använder cookie-baserad session-auth för skrivning av inlägg.
+API:t använder JWT bearer-auth för skrivning av inlägg.
 
 **Regler:**
 
 * `GET /api/posts` och andra läs-endpoints är öppna utan inloggning.
-* `POST /api/posts` kräver inloggning (session-cookie).
-* Författare på nya inlägg tas alltid från inloggad session (inte från request-body).
+* `POST /api/posts` kräver inloggning (bearer-token).
+* Författare på nya inlägg tas alltid från inloggad token-identitet (inte från request-body).
 
 **Logga in (exempel):**
 
 ```bash
-curl -i -c cookies.txt \
+curl -s \
   -H "Content-Type: application/json" \
   -d '{"username":"alice","password":"alice"}' \
   http://localhost:5000/api/auth/login
@@ -177,25 +178,27 @@ curl -i \
   http://localhost:5000/api/users
 ```
 
-**Kolla aktiv session:**
+**Kolla aktiv auth-user:**
 
 ```bash
-curl -i -b cookies.txt http://localhost:5000/api/auth/me
+TOKEN="<paste-access-token-here>"
+curl -i -H "Authorization: Bearer $TOKEN" http://localhost:5000/api/auth/me
 ```
 
 **Skapa inlägg som inloggad user:**
 
 ```bash
-curl -i -b cookies.txt \
+curl -i \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"content":"Hej från session-auth"}' \
+  -d '{"content":"Hej från jwt-auth"}' \
   http://localhost:5000/api/posts
 ```
 
 **Logga ut:**
 
 ```bash
-curl -i -b cookies.txt -X POST http://localhost:5000/api/auth/logout
+curl -i -X POST http://localhost:5000/api/auth/logout
 ```
 
 ### 2) Starta klienten i dev (port 3000)
@@ -285,6 +288,14 @@ npm run build
 ```bash
 dotnet run --project UsersAndPosts
 cd UsersAndPostsClient && npm run dev
+```
+
+**Kör Playwright e2e (auth-flöde)**
+
+```bash
+cd UsersAndPosts.E2E
+npm install
+npm test
 ```
 
 ---

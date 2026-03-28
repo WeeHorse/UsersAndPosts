@@ -1,30 +1,46 @@
 import { api, API_BASE } from "./http";
-import type { LoginDto, SessionUserDto } from "../generated/dtos";
+import type { AuthLoginResponseDto, LoginDto, SessionUserDto } from "../generated/dtos";
+import { clearAccessToken, getAccessToken, setAccessToken } from "./token";
 
 export function login(dto: LoginDto) {
-  return api<SessionUserDto>("/auth/login", {
+  return api<AuthLoginResponseDto>("/auth/login", {
     method: "POST",
     body: JSON.stringify(dto)
   });
 }
 
-export function logout() {
+export async function logout() {
+  clearAccessToken();
+
   return api<void>("/auth/logout", {
     method: "POST"
   });
 }
 
 export async function getSessionUser() {
+  const token = getAccessToken();
+  if (!token) return null;
+
   const res = await fetch(`${API_BASE}/auth/me`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json" }
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`
+    }
   });
 
-  if (res.status === 401) return null;
+  if (res.status === 401) {
+    clearAccessToken();
+    return null;
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`API ${res.status} ${res.statusText}: ${text}`);
   }
 
   return (await res.json()) as SessionUserDto;
+}
+
+export function persistLogin(response: AuthLoginResponseDto) {
+  setAccessToken(response.accessToken);
+  return response.user;
 }

@@ -1,0 +1,13 @@
+{
+  "name": "users-and-posts-e2e",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "test": "npm --prefix ../UsersAndPostsClient run build && playwright test",
+    "test:headed": "npm --prefix ../UsersAndPostsClient run build && playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}

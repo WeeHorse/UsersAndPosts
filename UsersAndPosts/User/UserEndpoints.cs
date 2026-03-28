@@ -1,6 +1,7 @@
 using System.Security.Claims;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
+using System.IdentityModel.Tokens.Jwt;
+using System.Text;
+using Microsoft.IdentityModel.Tokens;
 
 namespace UsersAndPosts.User;
 
@@ -8,7 +9,7 @@ public static class UserEndpoints
 {
   public static void MapUserEndpoints(this IEndpointRouteBuilder app)
   {
-    app.MapPost("auth/login", async (UserDtos.LoginDto dto, UserRepo repo, HttpContext httpContext) =>
+    app.MapPost("auth/login", async (UserDtos.LoginDto dto, UserRepo repo, IConfiguration config) =>
     {
       if (string.IsNullOrWhiteSpace(dto.Username))
       {
@@ -26,39 +27,57 @@ public static class UserEndpoints
         return Results.BadRequest(new { error = "Invalid username or password." });
       }
 
-      var claims = new List<Claim>
+      var issuer = config["Jwt:Issuer"] ?? "UsersAndPosts";
+      var audience = config["Jwt:Audience"] ?? "UsersAndPosts.Client";
+      var key = config["Jwt:Key"] ?? "replace-this-dev-key-with-32-plus-chars";
+      var expiresInMinutes = int.TryParse(config["Jwt:ExpiresMinutes"], out var configuredMinutes)
+          ? configuredMinutes
+          : 60;
+
+      Claim[] claims =
       {
         new(ClaimTypes.NameIdentifier, user.Id.ToString()),
         new(ClaimTypes.Name, user.Username),
         new("display_name", user.DisplayName)
       };
 
-      var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-      var principal = new ClaimsPrincipal(identity);
+      var expiresAt = DateTime.UtcNow.AddMinutes(expiresInMinutes);
+      var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
+      var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.HmacSha256);
 
-      await httpContext.SignInAsync(
-          CookieAuthenticationDefaults.AuthenticationScheme,
-          principal,
-          new AuthenticationProperties { IsPersistent = true }
+      var jwt = new JwtSecurityToken(
+          issuer: issuer,
+          audience: audience,
+          claims: claims,
+          notBefore: DateTime.UtcNow,
+          expires: expiresAt,
+          signingCredentials: credentials
       );
 
-      return Results.Ok(new UserDtos.SessionUserDto(user.Id, user.Username, user.DisplayName));
+      var token = new JwtSecurityTokenHandler().WriteToken(jwt);
+
+      return Results.Ok(new UserDtos.AuthLoginResponseDto(
+          token,
+          "Bearer",
+          (int)Math.Max(1, (expiresAt - DateTime.UtcNow).TotalSeconds),
+          new UserDtos.SessionUserDto(user.Id, user.Username, user.DisplayName)
+      ));
     });
 
-    app.MapPost("auth/logout", async (HttpContext httpContext) =>
+    app.MapPost("auth/logout", () =>
     {
-      await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+      // Stateless JWT has no server-side session to clear.
       return Results.NoContent();
     });
 
-    app.MapGet("auth/me", async (HttpContext httpContext, UserRepo repo) =>
+    app.MapGet("auth/me", async (ClaimsPrincipal principal, UserRepo repo) =>
     {
-      if (httpContext.User?.Identity?.IsAuthenticated != true)
+      if (principal.Identity?.IsAuthenticated != true)
       {
         return Results.Unauthorized();
       }
 
-      var userIdClaim = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+      var userIdClaim = principal.FindFirstValue(ClaimTypes.NameIdentifier);
       if (!int.TryParse(userIdClaim, out var userId))
       {
         return Results.Unauthorized();
@@ -71,7 +90,7 @@ public static class UserEndpoints
       }
 
       return Results.Ok(new UserDtos.SessionUserDto(user.Id, user.Username, user.DisplayName));
-    });
+    }).RequireAuthorization();
 
     app.MapGet("users", async (UserRepo repo) =>
     {

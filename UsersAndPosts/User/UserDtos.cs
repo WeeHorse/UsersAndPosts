@@ -31,4 +31,12 @@ public static class UserDtos
       string Username,
       string DisplayName
     );
+
+    [DtoContract("Auth")]
+    public sealed record AuthLoginResponseDto(
+      string AccessToken,
+      string TokenType,
+      int ExpiresInSeconds,
+      SessionUserDto User
+    );
 }

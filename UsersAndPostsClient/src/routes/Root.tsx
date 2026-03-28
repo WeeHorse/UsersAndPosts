@@ -1,6 +1,6 @@
 import { Form, NavLink, Outlet, redirect, useLoaderData, useLocation } from "react-router-dom";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router-dom";
-import { getSessionUser, login, logout } from "../api/auth";
+import { getSessionUser, login, logout, persistLogin } from "../api/auth";
 import type { SessionUserDto } from "../generated/dtos";
 
 export async function rootLoader(_: LoaderFunctionArgs) {
@@ -16,7 +16,8 @@ export async function rootAction({ request }: ActionFunctionArgs) {
   if (intent === "login") {
     const username = String(data.get("username") ?? "");
     const password = String(data.get("password") ?? "");
-    await login({ username, password });
+    const loginResponse = await login({ username, password });
+    persistLogin(loginResponse);
   }
 
   if (intent === "logout") {

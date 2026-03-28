@@ -2,10 +2,16 @@ using UsersAndPosts.Shared;
 using UsersAndPosts.User;
 using UsersAndPosts.Post;
 using Microsoft.AspNetCore.Http.Json;
-using Microsoft.AspNetCore.Authentication.Cookies;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.OpenApi.Models;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "UsersAndPosts";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "UsersAndPosts.Client";
+var jwtKey = builder.Configuration["Jwt:Key"] ?? "replace-this-dev-key-with-32-plus-chars";
 
 if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]))
 {
@@ -19,15 +25,15 @@ builder.Services.AddSwaggerGen(options =>
     {
         Title = "UsersAndPosts API",
         Version = "v1",
-        Description = "Minimal API for users, posts, and session authentication."
+        Description = "Minimal API for users, posts, and JWT authentication."
     });
 
-    options.AddSecurityDefinition("cookieAuth", new OpenApiSecurityScheme
+    options.AddSecurityDefinition("bearerAuth", new OpenApiSecurityScheme
     {
-        Type = SecuritySchemeType.ApiKey,
-        In = ParameterLocation.Cookie,
-        Name = "usersandposts.session",
-        Description = "Session cookie set by POST /api/auth/login"
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        Description = "JWT bearer token from POST /api/auth/login"
     });
 
     options.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -38,7 +44,7 @@ builder.Services.AddSwaggerGen(options =>
                 Reference = new OpenApiReference
                 {
                     Type = ReferenceType.SecurityScheme,
-                    Id = "cookieAuth"
+                    Id = "bearerAuth"
                 }
             },
             Array.Empty<string>()
@@ -46,26 +52,26 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 builder.Services
-        .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-        .AddCookie(options =>
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
         {
-            options.Cookie.Name = "usersandposts.session";
-            options.SlidingExpiration = true;
-            options.Events = new CookieAuthenticationEvents
+            options.TokenValidationParameters = new TokenValidationParameters
             {
-                OnRedirectToLogin = context =>
-                {
-                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                    return Task.CompletedTask;
-                },
-                OnRedirectToAccessDenied = context =>
-                {
-                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    return Task.CompletedTask;
-                }
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateIssuerSigningKey = true,
+                ValidateLifetime = true,
+                ValidIssuer = jwtIssuer,
+                ValidAudience = jwtAudience,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+                ClockSkew = TimeSpan.Zero
             };
         });
 builder.Services.AddAuthorization();
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+});
 
 builder.Services.AddSingleton<Db>();
 builder.Services.AddSingleton<UserRepo>();

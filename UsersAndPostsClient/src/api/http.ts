@@ -1,9 +1,21 @@
+import { getAccessToken } from "./token";
+
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAccessToken();
+  const headers = new Headers(init?.headers);
+
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers,
     ...init
   });
 
