@@ -73,6 +73,8 @@ jobs:
           sleep 5
           # Optional: Add health check or tests here
           echo "Server started"
+
+
       # Install npm dependencies for system tests
       # - name: Install test dependencies
       #  working-directory: Testing/SystemTests
@@ -83,9 +85,9 @@ jobs:
       #  run: dotnet test
 
       # Run API tests
-      # - name: Run api tests
-      #  working-directory: Testing/SystemTests
-      #  run: npm run test:api
+      - name: Run api tests
+        working-directory: postman
+        run: npm run test:api
 
       # Run UI tests
       # - name: Run system tests

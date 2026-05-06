@@ -1,0 +1,14 @@
+{
+  "name": "usersandpoststesting",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "newman run ../postman/UsersAndPosts.standard-tests.postman-collection.json"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "newman": "^6.2.2"
+  }
+}
