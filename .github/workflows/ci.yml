@@ -83,11 +83,18 @@ jobs:
       # - name: Run unit tests
       #  run: dotnet test
 
+      # Debug step to show current working directory and directory contents
+      - name: Debug working directory
+        working-directory: UsersAndPostsTesting/api-tests
+        run: |
+          pwd
+          ls -la
+
       # Run API tests
       - name: Run api tests
         working-directory: UsersAndPostsTesting
         run: npm run test:api
-      
+        
       # Run UI tests
       # - name: Run system tests
       #  working-directory: Testing/SystemTests
