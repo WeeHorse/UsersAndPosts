@@ -37,7 +37,7 @@ UsersAndPosts.DtoContractGen/ # Tool som genererar dtos.json från C# DTOs
 Från repo-roten:
 
 ```bash
-dotnet run --project UsersAndPosts
+dotnet run --project UsersAndPosts --urls "http://localhost:5000"
 ````
 
 API-bas: `http://localhost:5000/api`
@@ -255,8 +255,7 @@ UsersAndPosts/wwwroot/
 ### 3) Kör API och öppna klienten på port 5000
 
 ```bash
-cd ../UsersAndPosts
-dotnet run
+dotnet run --project UsersAndPosts --urls "http://localhost:5000"
 ```
 
 Öppna:
@@ -282,8 +281,12 @@ npm run build
 
 **Kör allt i dev (två terminaler)**
 
+#### Terminal 1
 ```bash
-dotnet run --project UsersAndPosts
+dotnet run --project UsersAndPosts --urls "http://localhost:5000"
+```
+#### Terminal 2
+```bash
 cd UsersAndPostsClient && npm run dev
 ```
 
@@ -306,7 +309,7 @@ Repo:t innehåller en färdig Postman-collection med grundläggande API-tester:
 
 ### Körning
 
-1. Starta API:t lokalt (`dotnet run --project UsersAndPosts`).
+1. Starta API:t lokalt (`dotnet run --project UsersAndPosts --urls "http://localhost:5000"`).
 2. Importera collection-filen i Postman.
 3. Kör hela collectionen i Collection Runner i ordning (01 → 12).
 4. Verifiera att alla requests får gröna tester.
