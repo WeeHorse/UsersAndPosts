@@ -44,7 +44,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: UsersAndPostsClient/package-lock.json
           cache: "npm"
 
       # Install npm dependencies for the frontend project using clean install (package-lock.json enforced)
