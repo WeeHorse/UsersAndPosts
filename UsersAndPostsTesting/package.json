@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test:api": "newman run ./api-tests/UsersAndPosts.standard-tests.postman-collection.json"
+    "test:api": "newman run api-tests/UsersAndPosts.standard-tests.postman_collection.json"
   },
   "author": "",
   "license": "ISC",
