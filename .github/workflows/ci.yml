@@ -69,7 +69,7 @@ jobs:
       - name: Run dotnet server
         working-directory: UsersAndPosts
         run: |
-          dotnet run &
+          dotnet run --urls "http://localhost:5000" &
           sleep 5
           # Optional: Add health check or tests here
           echo "Server started"
