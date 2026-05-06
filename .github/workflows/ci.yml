@@ -33,6 +33,15 @@ jobs:
         working-directory: UsersAndPosts
         run: dotnet build --no-restore
 
+      # --- DTO contract generation (build-time artifact) ---
+      - name: Generate dtos.json from C# DTOs
+        run: dotnet run -c Release --project UsersAndPosts.DtoContractGen
+
+      - name: Validate dtos.json exists and is valid JSON
+        run: |
+          test -f UsersAndPosts/dtos.json || (echo "dtos.json was not generated" && exit 1)
+          node -e "JSON.parse(require('fs').readFileSync('UsersAndPosts/dtos.json','utf8')); console.log('dtos.json OK');"
+
       # Debug step to show current working directory and directory contents
       - name: Debug working directory
         run: |
